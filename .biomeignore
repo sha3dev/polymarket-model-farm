@@ -1,0 +1,17 @@
+node_modules
+dist
+coverage
+.code-standards
+.model-farm-live
+ai/contract.json
+src/app/service-runtime.service.ts
+src/model/model-definition.service.ts
+src/model/model-registry.service.ts
+src/model/model.types.ts
+src/prediction/prediction.service.ts
+src/trainer-state/trainer-state.service.ts
+src/training/training-orchestrator.service.ts
+test/model-registry.test.ts
+test/prediction.test.ts
+test/service-runtime.test.ts
+test/snapshot-feature-projector.test.ts
