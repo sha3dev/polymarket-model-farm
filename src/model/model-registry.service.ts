@@ -132,6 +132,9 @@ export class ModelRegistryService {
         const pair = { asset, window };
         const metadata = await this.modelStoreService.loadMetadata(pair);
         const model = await this.modelStoreService.loadModel(pair);
+        if (model) {
+          this.modelDefinitionService.compileModel(model);
+        }
         const ledger = this.buildLedger(pair, await this.modelStoreService.loadLedger(pair));
         const paths = this.modelStoreService.describePaths(pair);
         this.slots.set(this.buildSlotKey(pair), {

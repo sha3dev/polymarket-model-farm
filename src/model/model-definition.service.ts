@@ -26,8 +26,20 @@ export class ModelDefinitionService {
   }
 
   /**
+   * @section private:methods
+   */
+
+  private buildCompileOptions(): Parameters<tf.LayersModel["compile"]>[0] {
+    return { optimizer: tf.train.adam(config.MODEL_LEARNING_RATE), loss: tf.losses.huberLoss, metrics: ["mae"] };
+  }
+
+  /**
    * @section public:methods
    */
+
+  public compileModel(model: tf.LayersModel): void {
+    model.compile(this.buildCompileOptions());
+  }
 
   public createModel(pair: AssetWindow, featureCount: number): tf.LayersModel {
     const gruUnits = pair.window === "5m" ? config.MODEL_GRU_UNITS_5M : config.MODEL_GRU_UNITS_15M;
@@ -38,7 +50,7 @@ export class ModelDefinitionService {
     model.add(tf.layers.gru({ units: gruUnits, dropout: config.MODEL_DROPOUT_RATE, kernelRegularizer: regularizer, recurrentRegularizer: regularizer }));
     model.add(tf.layers.dense({ units: 32, activation: "relu", kernelRegularizer: regularizer }));
     model.add(tf.layers.dense({ units: 1, activation: "tanh" }));
-    model.compile({ optimizer: tf.train.adam(config.MODEL_LEARNING_RATE), loss: tf.losses.huberLoss, metrics: ["mae"] });
+    this.compileModel(model);
     return model;
   }
 

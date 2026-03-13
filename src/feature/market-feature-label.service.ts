@@ -24,8 +24,8 @@ const EXCHANGE_STATISTIC_LABELS = [
   "mid-vs-price-to-beat",
   "top-book-imbalance",
 ] as const;
-const EXTERNAL_STRUCTURE_LABELS = ["external-price-range-normalized", "external-stddev-normalized", "external-source-count-normalized"] as const;
-const POLYMARKET_STATE_LABELS = ["up-price", "down-price", "up-down-price-gap", "up-mid", "down-mid", "up-mid-minus-down-mid", "polymarket-gap-vs-external"] as const;
+const EXTERNAL_STRUCTURE_LABELS = ["exchange-price-range-normalized", "exchange-stddev-normalized", "exchange-source-count-normalized", "chainlink-vs-exchange-median"] as const;
+const POLYMARKET_STATE_LABELS = ["up-price", "down-price", "up-down-price-gap", "up-mid", "down-mid", "up-mid-minus-down-mid", "polymarket-overround", "polymarket-mid-overround"] as const;
 const POLYMARKET_BOOK_STATISTIC_LABELS = ["best-bid", "best-ask", "spread", "mid", "top-book-imbalance"] as const;
 
 /**
@@ -46,7 +46,7 @@ export class MarketFeatureLabelService {
    */
 
   private buildExchangeLabels(labels: string[]): void {
-    for (const providerKey of PROVIDER_KEYS) {
+    for (const providerKey of [...PROVIDER_KEYS]) {
       for (const statisticLabel of EXCHANGE_STATISTIC_LABELS) {
         labels.push(`${providerKey}-${statisticLabel}`);
       }

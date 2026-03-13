@@ -1,6 +1,7 @@
 import * as assert from "node:assert/strict";
 import { test } from "node:test";
 
+import { ModelRegistryService } from "../src/model/index.ts";
 import type { PredictionMarketInput } from "../src/prediction/index.ts";
 import { PredictionService } from "../src/prediction/index.ts";
 
@@ -48,6 +49,57 @@ test("PredictionService rejects pairs with fewer than 100 trained markets", asyn
   });
 
   await assert.rejects(async () => predictionService.buildPrediction(buildMarketInput()), /at least 100 trained markets/);
+});
+
+test("ModelRegistryService recompiles loaded models before training reuse", async () => {
+  let compileCallCount = 0;
+  const loadedModel = { compile: () => { compileCallCount += 1; } };
+  const modelRegistryService = new ModelRegistryService({
+    modelDefinitionService: {
+      createModel: () => {
+        throw new Error("createModel should not be used for a loaded checkpoint");
+      },
+      compileModel: () => {
+        compileCallCount += 1;
+      },
+      buildMetadata: () => ({
+        modelVersion: "btc-15m-2026-03-13T00:00:00.000Z",
+        featureCount: 91,
+        maxSequenceLength: 1800,
+        gruUnits: 72,
+        dropoutRate: 0.15,
+        learningRate: 0.0005,
+        l2Regularization: 0.00001,
+        checkpointedAt: "2026-03-13T00:00:00.000Z",
+      }),
+    } as unknown as ConstructorParameters<typeof ModelRegistryService>[0]["modelDefinitionService"],
+    modelStoreService: {
+      ensureStorageDirectory: async () => {},
+      loadMetadata: async ({ asset, window }: { asset: string; window: string }) =>
+        asset === "btc" && window === "15m"
+          ? {
+              modelVersion: "btc-15m-2026-03-13T00:00:00.000Z",
+              featureCount: 91,
+              maxSequenceLength: 1800,
+              gruUnits: 72,
+              dropoutRate: 0.15,
+              learningRate: 0.0005,
+              l2Regularization: 0.00001,
+              checkpointedAt: "2026-03-13T00:00:00.000Z",
+            }
+          : null,
+      loadModel: async ({ asset, window }: { asset: string; window: string }) => (asset === "btc" && window === "15m" ? (loadedModel as never) : null),
+      loadLedger: async () => null,
+      describePaths: () => ({ pairDirectoryPath: "/tmp/pair", modelDirectoryPath: "/tmp/model", modelJsonPath: "/tmp/model/model.json", ledgerPath: "/tmp/ledger.json", metadataPath: "/tmp/metadata.json" }),
+      saveModelArtifacts: async () => {},
+      saveLedger: async () => {},
+    } as unknown as ConstructorParameters<typeof ModelRegistryService>[0]["modelStoreService"],
+    featureCount: 91,
+  });
+
+  await modelRegistryService.initialize();
+
+  assert.equal(compileCallCount, 1);
 });
 
 function buildMarketInput(): PredictionMarketInput {

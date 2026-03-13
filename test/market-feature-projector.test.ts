@@ -6,7 +6,7 @@ import { MarketFeatureProjectorService } from "../src/feature/index.ts";
 
 const PROJECTOR_SERVICE = MarketFeatureProjectorService.createDefault();
 
-test("MarketFeatureProjectorService builds the intended 89-feature row", () => {
+test("MarketFeatureProjectorService builds the intended 91-feature row", () => {
   const projection = PROJECTOR_SERVICE.projectSequence({
     asset: "btc",
     window: "5m",
@@ -19,13 +19,14 @@ test("MarketFeatureProjectorService builds the intended 89-feature row", () => {
 
   const labels = PROJECTOR_SERVICE.getFeatureLabels();
 
-  assert.equal(labels.length, 89);
+  assert.equal(labels.length, 91);
   assert.equal(projection.rows.length, 2);
-  assert.equal(projection.rows[0]?.length, 89);
+  assert.equal(projection.rows[0]?.length, 91);
   assert.equal(labels.includes("chainlink-momentum10s"), true);
   assert.equal(labels.includes("binance-volatility60s"), true);
+  assert.equal(labels.includes("chainlink-vs-exchange-median"), true);
+  assert.equal(labels.includes("polymarket-overround"), true);
   assert.equal(labels.includes("up-top-book-imbalance"), true);
-  assert.equal(labels.includes("polymarket-gap-vs-external"), true);
   assert.ok((projection.rows[1]?.[0] || 0) > 0);
   assert.ok(projection.rows.flat().every((value) => Number.isFinite(value)));
 });

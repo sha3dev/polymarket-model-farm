@@ -3,9 +3,16 @@
  */
 
 import { ORDERBOOK_SIDES, PROVIDER_KEYS } from "../collector/index.ts";
+import type { ProviderKey } from "../collector/index.ts";
 import type { FeatureProjectionInput, FeatureProjectionResult } from "./index.ts";
 import { MarketFeatureLabelService } from "./market-feature-label.service.ts";
 import { MarketFeatureStatService } from "./market-feature-stat.service.ts";
+
+/**
+ * @section consts
+ */
+
+const EXCHANGE_PROVIDER_KEYS: readonly ProviderKey[] = ["binance", "coinbase", "kraken", "okx"];
 
 /**
  * @section public:properties
@@ -91,14 +98,16 @@ export class MarketFeatureProjectorService {
     if (!snapshot) {
       throw new Error(`snapshot index ${index} is out of range`);
     }
-    const externalPrices = PROVIDER_KEYS.map((providerKey) => this.marketFeatureStatService.readProviderPrice(snapshot, providerKey)).filter((price): price is number => price !== null);
-    const sortedPrices = externalPrices.slice().sort((left, right) => left - right);
-    const medianPrice = this.marketFeatureStatService.readMedianExternalPrice(snapshot, PROVIDER_KEYS) || 0;
-    const priceRange = externalPrices.length === 0 ? 0 : (sortedPrices[sortedPrices.length - 1] || 0) - (sortedPrices[0] || 0);
+    const exchangePrices = EXCHANGE_PROVIDER_KEYS.map((providerKey) => this.marketFeatureStatService.readProviderPrice(snapshot, providerKey)).filter((price): price is number => price !== null);
+    const sortedPrices = exchangePrices.slice().sort((left, right) => left - right);
+    const exchangeMedianPrice = this.marketFeatureStatService.readMedianExternalPrice(snapshot, EXCHANGE_PROVIDER_KEYS) || 0;
+    const chainlinkPrice = this.marketFeatureStatService.readProviderPrice(snapshot, "chainlink");
+    const priceRange = exchangePrices.length === 0 ? 0 : (sortedPrices[sortedPrices.length - 1] || 0) - (sortedPrices[0] || 0);
     return [
-      this.marketFeatureStatService.normalizeSpread(priceRange, medianPrice),
-      this.marketFeatureStatService.normalizeSpread(this.marketFeatureStatService.computeStandardDeviation(externalPrices), medianPrice),
-      externalPrices.length / PROVIDER_KEYS.length,
+      this.marketFeatureStatService.normalizeSpread(priceRange, exchangeMedianPrice),
+      this.marketFeatureStatService.normalizeSpread(this.marketFeatureStatService.computeStandardDeviation(exchangePrices), exchangeMedianPrice),
+      exchangePrices.length / EXCHANGE_PROVIDER_KEYS.length,
+      this.marketFeatureStatService.normalizePrice(chainlinkPrice, exchangeMedianPrice),
     ];
   }
 
@@ -109,7 +118,6 @@ export class MarketFeatureProjectorService {
     }
     const upMid = this.marketFeatureStatService.readOrderBookMid(snapshot.upOrderBook);
     const downMid = this.marketFeatureStatService.readOrderBookMid(snapshot.downOrderBook);
-    const externalMedianPrice = this.marketFeatureStatService.readMedianExternalPrice(snapshot, PROVIDER_KEYS);
     return [
       this.marketFeatureStatService.safeNumber(snapshot.upPrice),
       this.marketFeatureStatService.safeNumber(snapshot.downPrice),
@@ -117,8 +125,8 @@ export class MarketFeatureProjectorService {
       upMid,
       downMid,
       upMid - downMid,
-      (this.marketFeatureStatService.safeNumber(snapshot.upPrice) - this.marketFeatureStatService.safeNumber(snapshot.downPrice)) -
-        this.marketFeatureStatService.normalizePrice(externalMedianPrice, input.priceToBeat),
+      this.marketFeatureStatService.safeNumber(snapshot.upPrice) + this.marketFeatureStatService.safeNumber(snapshot.downPrice) - 1,
+      upMid + downMid - 1,
     ];
   }
 
