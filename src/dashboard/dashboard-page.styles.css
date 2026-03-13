@@ -7,7 +7,7 @@ h1, h2, h3, h4, p, button { margin: 0; }
 .update-bar { display: flex; justify-content: space-between; gap: 12px; align-items: center; padding: 10px 12px; border-radius: 16px; margin-bottom: 12px; }
 .eyebrow, .hint-label, th { display: block; text-transform: uppercase; letter-spacing: 0.14em; font-size: 9px; color: var(--muted); }
 .update-bar p, .section-heading p, .history-caption { color: var(--muted); line-height: 1.45; }
-.update-value, .fact-value { display: block; margin-top: 4px; font-size: 14px; color: var(--text); }
+.update-value, .fact-value { display: block; margin-top: 3px; font-size: 12px; font-weight: 600; color: var(--text); }
 .section-heading { display: flex; justify-content: space-between; gap: 12px; align-items: end; margin: 14px 0 8px; }
 .section-heading h2 { font-size: 14px; letter-spacing: -0.02em; }
 .section-heading p { font-size: 11px; }
@@ -28,7 +28,7 @@ h1, h2, h3, h4, p, button { margin: 0; }
 .card.down .direction-pill, .card.down .direction-value { color: var(--down); }
 .card.flat .direction-pill, .card.flat .direction-value { color: var(--flat); }
 .status-row { margin-bottom: 8px; padding: 0 0 8px; border-bottom: 1px solid rgba(255,255,255,0.08); }
-.direction-value { display: block; font-size: 17px; font-weight: 700; letter-spacing: -0.03em; }
+.direction-value { display: block; font-size: 14px; font-weight: 600; letter-spacing: -0.02em; }
 .progress-shell { margin-top: 6px; min-width: 120px; }
 .progress-header { display: flex; justify-content: space-between; gap: 12px; font-size: 10px; color: var(--soft); margin-bottom: 6px; }
 .progress-track { width: 100%; height: 6px; border-radius: 999px; overflow: hidden; background: rgba(255,255,255,0.08); }
