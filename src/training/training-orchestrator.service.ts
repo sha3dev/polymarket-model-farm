@@ -121,6 +121,9 @@ export class TrainingOrchestratorService {
     const marketSummaries = await this.collectorClientService.listMarkets(pair);
     const candidates: TrainingMarketCandidate[] = [];
     for (const marketSummary of marketSummaries) {
+      if (candidates.length >= config.TRAINING_MAX_MARKETS_PER_CYCLE) {
+        break;
+      }
       const hasClosed = Date.parse(marketSummary.marketEnd) <= this.now() - config.TRAINING_CLOSE_GRACE_MS;
       const hasPriceToBeat = typeof marketSummary.priceToBeat === "number";
       const hasTrainedMarket = this.modelRegistryService.hasTrainedMarket(pair, marketSummary.slug);
@@ -159,7 +162,7 @@ export class TrainingOrchestratorService {
   private async runPairCycle(pair: AssetWindow): Promise<TrainingPairCycleResult> {
     const candidates = await this.collectTrainingCandidates(pair);
     let trainedMarketCount = 0;
-    for (const candidate of candidates.slice(0, config.TRAINING_MAX_MARKETS_PER_CYCLE)) {
+    for (const candidate of candidates) {
       try {
         await this.trainCandidate(pair, candidate);
         trainedMarketCount += 1;

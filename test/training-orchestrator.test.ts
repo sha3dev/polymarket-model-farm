@@ -44,6 +44,34 @@ test("TrainingOrchestratorService serializes concurrent cycles across all pairs"
   assert.deepEqual(sequenceLog, [...buildExpectedOrder(), ...buildExpectedOrder()]);
 });
 
+test("TrainingOrchestratorService only loads the maximum number of trainable markets per cycle", async () => {
+  const loadedSlugs: string[] = [];
+  const trainingOrchestratorService = new TrainingOrchestratorService({
+    collectorClientService: {
+      listMarkets: async ({ asset, window }: { asset: SupportedAsset; window: SupportedWindow }) => [
+        { slug: `${asset}-${window}-market-a`, asset, window, priceToBeat: 100, prevPriceToBeat: [99], marketStart: "2026-03-12T00:00:00.000Z", marketEnd: "2026-03-12T00:05:00.000Z" },
+        { slug: `${asset}-${window}-market-b`, asset, window, priceToBeat: 100, prevPriceToBeat: [99], marketStart: "2026-03-12T00:10:00.000Z", marketEnd: "2026-03-12T00:15:00.000Z" },
+      ],
+      loadMarketSnapshots: async (slug: string) => {
+        loadedSlugs.push(slug);
+        const [asset, window] = slug.split("-") as [SupportedAsset, SupportedWindow, string];
+        return { slug, asset, window, marketStart: "2026-03-12T00:00:00.000Z", marketEnd: "2026-03-12T00:05:00.000Z", snapshots: buildSnapshots(asset, window) };
+      },
+    } as unknown as ConstructorParameters<typeof TrainingOrchestratorService>[0]["collectorClientService"],
+    modelRegistryService: { hasTrainedMarket: () => false, train: async () => {}, markMarketAsTrained: async () => {}, setLatestTrainingError: () => {} } as unknown as ConstructorParameters<
+      typeof TrainingOrchestratorService
+    >[0]["modelRegistryService"],
+    marketFeatureProjectorService: { projectSequence: () => ({ labels: ["feature"], rows: [[1]], maxSequenceLength: 600 }) } as unknown as ConstructorParameters<typeof TrainingOrchestratorService>[0]["marketFeatureProjectorService"],
+    predictionHistoryService: { resolvePrediction: async () => {} } as unknown as ConstructorParameters<typeof TrainingOrchestratorService>[0]["predictionHistoryService"],
+    now: () => Date.parse("2026-03-12T01:00:00.000Z"),
+  });
+
+  await trainingOrchestratorService.runTrainingCycle();
+
+  assert.equal(loadedSlugs.length, SUPPORTED_ASSETS.length * SUPPORTED_WINDOWS.length);
+  assert.ok(loadedSlugs.every((slug) => slug.endsWith("market-a")));
+});
+
 function buildExpectedOrder(): string[] {
   const expectedOrder: string[] = [];
   for (const asset of SUPPORTED_ASSETS) {

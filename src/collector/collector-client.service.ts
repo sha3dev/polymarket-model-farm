@@ -30,8 +30,6 @@ export class CollectorClientService {
 
   private readonly marketCache: Map<string, CacheEntry<MarketSummary[]>>;
 
-  private readonly snapshotCache: Map<string, CacheEntry<MarketSnapshotsPayload>>;
-
   /**
    * @section constructor
    */
@@ -42,7 +40,6 @@ export class CollectorClientService {
     this.now = options.now;
     this.stateCache = new Map();
     this.marketCache = new Map();
-    this.snapshotCache = new Map();
   }
 
   /**
@@ -105,18 +102,9 @@ export class CollectorClientService {
   }
 
   public async loadMarketSnapshots(slug: string): Promise<MarketSnapshotsPayload> {
-    const cachedPayload = this.readCacheEntry(this.snapshotCache, slug);
-    let payload = cachedPayload;
-    if (!cachedPayload) {
-      const response = await this.fetchFn(new URL(`/markets/${slug}/snapshots`, this.baseUrl));
-      await this.assertSuccessfulResponse(response, `collector snapshot request failed for slug ${slug}`);
-      payload = (await response.json()) as MarketSnapshotsPayload;
-      this.writeCacheEntry(this.snapshotCache, slug, payload, config.COLLECTOR_SNAPSHOT_CACHE_TTL_MS);
-    }
-    if (!payload) {
-      throw new Error(`collector snapshot payload is unavailable for slug ${slug}`);
-    }
-    return { ...payload, snapshots: payload.snapshots.slice() };
+    const response = await this.fetchFn(new URL(`/markets/${slug}/snapshots`, this.baseUrl));
+    await this.assertSuccessfulResponse(response, `collector snapshot request failed for slug ${slug}`);
+    return (await response.json()) as MarketSnapshotsPayload;
   }
 
   public async loadState(): Promise<CollectorStatePayload> {

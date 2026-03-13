@@ -98,7 +98,7 @@ export class ModelRegistryService {
 
   private buildInputTensor(pair: AssetWindow, sequence: number[][]): tf.Tensor3D {
     const maxSequenceLength = pair.window === "5m" ? 600 : 1800;
-    const boundedSequence = sequence.slice(0, maxSequenceLength).map((row) => row.slice());
+    const boundedSequence = sequence.slice(0, maxSequenceLength);
     if (boundedSequence.length === 0) {
       boundedSequence.push(new Array(this.featureCount).fill(0));
     }
@@ -108,6 +108,11 @@ export class ModelRegistryService {
   private clamp(value: number, lowerBound: number, upperBound: number): number {
     const clampedValue = Math.min(Math.max(value, lowerBound), upperBound);
     return clampedValue;
+  }
+
+  private hasAnyTrainingSlot(): boolean {
+    const hasAnyTrainingSlot = [...this.slots.values()].some((slot) => slot.isTraining);
+    return hasAnyTrainingSlot;
   }
 
   private computeReferenceDelta(recentTargetDeltas: number[]): number {
@@ -146,16 +151,19 @@ export class ModelRegistryService {
 
   public async train(pair: AssetWindow, sequence: number[][], boundedTarget: number): Promise<void> {
     const slot = this.requireSlot(pair);
+    if (this.hasAnyTrainingSlot()) {
+      throw new Error(`another model slot is already training while requesting ${pair.asset}/${pair.window}`);
+    }
     const model = this.ensureModel(slot);
     const checkpointedAt = new Date().toISOString();
     slot.isTraining = true;
     slot.latestTrainingError = null;
+    let inputTensor: tf.Tensor3D | null = null;
+    let targetTensor: tf.Tensor2D | null = null;
     try {
-      const inputTensor = this.buildInputTensor(pair, sequence);
-      const targetTensor = tf.tensor2d([[boundedTarget]]);
+      inputTensor = this.buildInputTensor(pair, sequence);
+      targetTensor = tf.tensor2d([[boundedTarget]]);
       await model.fit(inputTensor, targetTensor, { epochs: config.TRAINING_EPOCHS_PER_MARKET, batchSize: config.TRAINING_BATCH_SIZE, verbose: 0, shuffle: false });
-      inputTensor.dispose();
-      targetTensor.dispose();
       slot.metadata = this.modelDefinitionService.buildMetadata(pair, this.featureCount, checkpointedAt);
       slot.hasCheckpoint = true;
       slot.ledger.modelVersion = slot.metadata.modelVersion;
@@ -164,6 +172,8 @@ export class ModelRegistryService {
       slot.latestTrainingError = error instanceof Error ? error.message : String(error);
       throw error;
     } finally {
+      inputTensor?.dispose();
+      targetTensor?.dispose();
       slot.isTraining = false;
     }
   }
@@ -190,12 +200,19 @@ export class ModelRegistryService {
     if (!slot.hasCheckpoint || slot.metadata === null) {
       throw new Error(`model checkpoint is not available for ${pair.asset}/${pair.window}`);
     }
-    const inputTensor = this.buildInputTensor(pair, sequence);
-    const predictionTensor = this.ensureModel(slot).predict(inputTensor) as tf.Tensor;
-    const predictionValues = await predictionTensor.data();
-    inputTensor.dispose();
-    predictionTensor.dispose();
-    return this.clamp(predictionValues[0] || 0, -1, 1);
+    let inputTensor: tf.Tensor3D | null = null;
+    let predictionTensor: tf.Tensor | null = null;
+    let boundedPrediction = 0;
+    try {
+      inputTensor = this.buildInputTensor(pair, sequence);
+      predictionTensor = this.ensureModel(slot).predict(inputTensor) as tf.Tensor;
+      const predictionValues = await predictionTensor.data();
+      boundedPrediction = this.clamp(predictionValues[0] || 0, -1, 1);
+    } finally {
+      inputTensor?.dispose();
+      predictionTensor?.dispose();
+    }
+    return boundedPrediction;
   }
 
   public hasTrainedMarket(pair: AssetWindow, slug: string): boolean {
