@@ -38,6 +38,10 @@ export class TrainingOrchestratorService {
 
   private isRunning: boolean;
 
+  private isCycleRunning: boolean;
+
+  private readonly cycleWaiters: Array<() => void>;
+
   /**
    * @section constructor
    */
@@ -49,6 +53,8 @@ export class TrainingOrchestratorService {
     this.now = options.now;
     this.loopTimer = null;
     this.isRunning = false;
+    this.isCycleRunning = false;
+    this.cycleWaiters = [];
   }
 
   /**
@@ -70,6 +76,38 @@ export class TrainingOrchestratorService {
       const delayMs = hadWork ? config.TRAINING_POLL_INTERVAL_MS : config.TRAINING_IDLE_BACKOFF_MS;
       await this.wait(delayMs);
     }
+  }
+
+  private async acquireCycleSlot(): Promise<void> {
+    // Serialize full training cycles so the process cannot train multiple models at once
+    // when runTrainingCycle is triggered concurrently from different call sites.
+    if (this.isCycleRunning) {
+      await new Promise<void>((resolve) => {
+        this.cycleWaiters.push(resolve);
+      });
+    }
+    this.isCycleRunning = true;
+  }
+
+  private releaseCycleSlot(): void {
+    const nextWaiter = this.cycleWaiters.shift() || null;
+    if (nextWaiter) {
+      nextWaiter();
+    } else {
+      this.isCycleRunning = false;
+    }
+  }
+
+  private async executeTrainingCycle(): Promise<TrainingPairCycleResult[]> {
+    const cycleResults: TrainingPairCycleResult[] = [];
+    for (const asset of SUPPORTED_ASSETS) {
+      for (const window of SUPPORTED_WINDOWS) {
+        const pair = { asset, window };
+        const pairResult = await this.runPairCycle(pair);
+        cycleResults.push(pairResult);
+      }
+    }
+    return cycleResults;
   }
 
   private async runPairCycle(pair: AssetWindow): Promise<TrainingPairCycleResult> {
@@ -182,13 +220,12 @@ export class TrainingOrchestratorService {
   }
 
   public async runTrainingCycle(): Promise<TrainingPairCycleResult[]> {
-    const cycleResults: TrainingPairCycleResult[] = [];
-    for (const asset of SUPPORTED_ASSETS) {
-      for (const window of SUPPORTED_WINDOWS) {
-        const pair = { asset, window };
-        const pairResult = await this.runPairCycle(pair);
-        cycleResults.push(pairResult);
-      }
+    let cycleResults: TrainingPairCycleResult[] = [];
+    await this.acquireCycleSlot();
+    try {
+      cycleResults = await this.executeTrainingCycle();
+    } finally {
+      this.releaseCycleSlot();
     }
     return cycleResults;
   }

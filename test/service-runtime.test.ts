@@ -73,7 +73,7 @@ test("ServiceRuntime serves health, trainer status, and predictions after traini
   });
 
   await modelRegistryService.initialize();
-  await trainingOrchestratorService.runTrainingCycle();
+  await Promise.all([trainingOrchestratorService.runTrainingCycle(), trainingOrchestratorService.runTrainingCycle()]);
   const server = runtime.buildServer();
   await new Promise<void>((resolve) => {
     server.listen(0, () => resolve());
