@@ -1,71 +1,126 @@
 import * as assert from "node:assert/strict";
 import { test } from "node:test";
 
-import type { PredictionRequestPayload } from "../src/prediction/index.ts";
+import type { PredictionMarketInput } from "../src/prediction/index.ts";
 import { PredictionService } from "../src/prediction/index.ts";
 
-test("PredictionService validates request payload shape", () => {
-  const service = new PredictionService({ modelRegistryService: buildRegistryStub(), snapshotFeatureProjectorService: buildProjectorStub(), now: () => "2026-03-12T00:00:00.000Z" });
+test("PredictionService converts model delta into directional confidence", async () => {
+  const predictionService = new PredictionService({
+    modelRegistryService: {
+      predict: async () => 0.5,
+      getPredictionContext: () => ({ metadata: null, trainedMarketCount: 12, modelVersion: "model-v1", hasCheckpoint: true, recentReferenceDelta: 0.004 }),
+    } as unknown as ConstructorParameters<typeof PredictionService>[0]["modelRegistryService"],
+    marketFeatureProjectorService: { projectSequence: () => ({ labels: ["progress"], rows: [[0.5]], maxSequenceLength: 600 }) } as unknown as ConstructorParameters<typeof PredictionService>[0]["marketFeatureProjectorService"],
+    now: () => "2026-03-13T00:00:00.000Z",
+  });
 
-  assert.throws(() => service.validateRequestPayload({ markets: [] }), /market count is invalid/);
+  const prediction = await predictionService.buildPrediction(buildMarketInput());
+
+  assert.equal(prediction.predictedDirection, "UP");
+  assert.equal(prediction.snapshotCount, 2);
+  assert.ok(prediction.predictedDelta > 0);
+  assert.ok(prediction.confidence > 0);
+  assert.ok(prediction.confidence <= 1);
+  assert.equal(prediction.modelVersion, "model-v1");
 });
 
-test("PredictionService requires historical priceToBeat values for confidence", async () => {
-  const service = new PredictionService({ modelRegistryService: buildRegistryStub(), snapshotFeatureProjectorService: buildProjectorStub(), now: () => "2026-03-12T00:00:00.000Z" });
-  const payload: PredictionRequestPayload = {
-    markets: [
-      {
-        asset: "btc",
-        window: "5m",
-        slug: "btc-5m-test",
-        marketStart: "2026-03-12T00:00:00.000Z",
-        marketEnd: "2026-03-12T00:05:00.000Z",
-        priceToBeat: 100,
-        snapshots: buildSnapshots(),
-      },
-    ],
+test("PredictionService rejects markets without historical price-to-beat", async () => {
+  const predictionService = new PredictionService({
+    modelRegistryService: {
+      predict: async () => 0,
+      getPredictionContext: () => ({ metadata: null, trainedMarketCount: 0, modelVersion: "model-v1", hasCheckpoint: true, recentReferenceDelta: 0 }),
+    } as unknown as ConstructorParameters<typeof PredictionService>[0]["modelRegistryService"],
+    marketFeatureProjectorService: { projectSequence: () => ({ labels: ["progress"], rows: [[0.1]], maxSequenceLength: 600 }) } as unknown as ConstructorParameters<typeof PredictionService>[0]["marketFeatureProjectorService"],
+    now: () => "2026-03-13T00:00:00.000Z",
+  });
+
+  await assert.rejects(async () => predictionService.buildPrediction({ ...buildMarketInput(), prevPriceToBeat: [] }), /prevPriceToBeat/);
+});
+
+function buildMarketInput(): PredictionMarketInput {
+  return {
+    asset: "btc",
+    window: "5m",
+    slug: "btc-5m-test",
+    marketStart: "2026-03-13T00:00:00.000Z",
+    marketEnd: "2026-03-13T00:05:00.000Z",
+    priceToBeat: 100,
+    prevPriceToBeat: [99.8, 100.1],
+    snapshots: [buildPredictionSnapshot("2026-03-13T00:00:00.000Z", 0.53, 0.47, 100.14, 100.2, 100.15, 100.1, 100.18), buildPredictionSnapshot("2026-03-13T00:04:00.000Z", 0.59, 0.41, 100.82, 100.8, 100.75, 100.78, 100.76)],
   };
-
-  await assert.rejects(async () => service.buildPredictionPayload(payload), /prevPriceToBeat must contain at least one valid historical value/);
-});
-
-test("PredictionService derives confidence from predicted delta and mean historical delta", async () => {
-  const service = new PredictionService({ modelRegistryService: buildRegistryStub(), snapshotFeatureProjectorService: buildProjectorStub(), now: () => "2026-03-12T00:00:00.000Z" });
-  const payload: PredictionRequestPayload = {
-    markets: [
-      {
-        asset: "btc",
-        window: "5m",
-        slug: "btc-5m-test",
-        marketStart: "2026-03-12T00:00:00.000Z",
-        marketEnd: "2026-03-12T00:05:00.000Z",
-        priceToBeat: 100,
-        prevPriceToBeat: [99, 101],
-        snapshots: buildSnapshots(),
-      },
-    ],
-  };
-
-  const response = await service.buildPredictionPayload(payload);
-
-  assert.equal(response.predictions[0]?.predictedDirection, "UP");
-  assert.ok((response.predictions[0]?.predictedDelta || 0) > 0);
-  assert.ok((response.predictions[0]?.confidence || 0) > 0);
-  assert.ok((response.predictions[0]?.confidence || 0) <= 1);
-});
-
-function buildRegistryStub(): ConstructorParameters<typeof PredictionService>[0]["modelRegistryService"] {
-  return { predict: async () => 0.5, getPredictionContext: () => ({ metadata: null, trainedMarketCount: 7, modelVersion: "stub-version", hasCheckpoint: true }) } as unknown as ConstructorParameters<typeof PredictionService>[0]["modelRegistryService"];
 }
 
-function buildProjectorStub(): ConstructorParameters<typeof PredictionService>[0]["snapshotFeatureProjectorService"] {
-  return { projectSequence: () => ({ labels: ["a"], rows: [[1]], maxSequenceLength: 600 }) } as unknown as ConstructorParameters<typeof PredictionService>[0]["snapshotFeatureProjectorService"];
+function buildPredictionSnapshot(
+  generatedAtIso: string,
+  upPrice: number,
+  downPrice: number,
+  chainlinkPrice: number,
+  binancePrice: number,
+  coinbasePrice: number,
+  krakenPrice: number,
+  okxPrice: number,
+): PredictionMarketInput["snapshots"][number] {
+  const generatedAt = Date.parse(generatedAtIso);
+  const exchangeFields = buildExchangeFields(chainlinkPrice, binancePrice, coinbasePrice, krakenPrice, okxPrice);
+  return {
+    asset: "btc",
+    window: "5m",
+    generatedAt,
+    marketId: null,
+    marketSlug: "btc-5m-test",
+    marketConditionId: null,
+    marketStart: "2026-03-13T00:00:00.000Z",
+    marketEnd: "2026-03-13T00:05:00.000Z",
+    priceToBeat: 100,
+    upAssetId: null,
+    upPrice,
+    upOrderBook: { bids: [{ price: upPrice - 0.01, size: 1 }], asks: [{ price: upPrice + 0.01, size: 1 }] },
+    upEventTs: null,
+    downAssetId: null,
+    downPrice,
+    downOrderBook: { bids: [{ price: downPrice - 0.01, size: 1 }], asks: [{ price: downPrice + 0.01, size: 1 }] },
+    downEventTs: null,
+    ...exchangeFields,
+  };
 }
 
-function buildSnapshots(): PredictionRequestPayload["markets"][number]["snapshots"] {
-  return [
-    { generatedAt: Date.parse("2026-03-12T00:00:00.000Z"), chainlinkPrice: 99.8, binancePrice: 99.8, coinbasePrice: 99.8, krakenPrice: 99.8, okxPrice: 99.8 } as PredictionRequestPayload["markets"][number]["snapshots"][number],
-    { generatedAt: Date.parse("2026-03-12T00:02:30.000Z"), chainlinkPrice: 100.4, binancePrice: 100.4, coinbasePrice: 100.4, krakenPrice: 100.4, okxPrice: 100.4 } as PredictionRequestPayload["markets"][number]["snapshots"][number],
-    { generatedAt: Date.parse("2026-03-12T00:05:00.000Z"), chainlinkPrice: 100.8, binancePrice: 100.8, coinbasePrice: 100.8, krakenPrice: 100.8, okxPrice: 100.8 } as PredictionRequestPayload["markets"][number]["snapshots"][number],
-  ];
+function buildProviderOrderBook(provider: string, price: number): NonNullable<PredictionMarketInput["snapshots"][number]["binanceOrderBook"]> {
+  return { type: "orderbook", provider, symbol: "btc", ts: 1, bids: [{ price, size: 1 }], asks: [{ price: price + 0.1, size: 1 }] };
+}
+
+function buildExchangeFields(chainlinkPrice: number, binancePrice: number, coinbasePrice: number, krakenPrice: number, okxPrice: number): Pick<
+  PredictionMarketInput["snapshots"][number],
+  | "binancePrice"
+  | "binanceOrderBook"
+  | "binanceEventTs"
+  | "coinbasePrice"
+  | "coinbaseOrderBook"
+  | "coinbaseEventTs"
+  | "krakenPrice"
+  | "krakenOrderBook"
+  | "krakenEventTs"
+  | "okxPrice"
+  | "okxOrderBook"
+  | "okxEventTs"
+  | "chainlinkPrice"
+  | "chainlinkOrderBook"
+  | "chainlinkEventTs"
+> {
+  return {
+    binancePrice,
+    binanceOrderBook: buildProviderOrderBook("binance", binancePrice),
+    binanceEventTs: null,
+    coinbasePrice,
+    coinbaseOrderBook: buildProviderOrderBook("coinbase", coinbasePrice),
+    coinbaseEventTs: null,
+    krakenPrice,
+    krakenOrderBook: buildProviderOrderBook("kraken", krakenPrice),
+    krakenEventTs: null,
+    okxPrice,
+    okxOrderBook: buildProviderOrderBook("okx", okxPrice),
+    okxEventTs: null,
+    chainlinkPrice,
+    chainlinkOrderBook: buildProviderOrderBook("chainlink", chainlinkPrice),
+    chainlinkEventTs: null,
+  };
 }

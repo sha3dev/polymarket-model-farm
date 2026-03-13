@@ -1,23 +1,12 @@
 /**
- * @section consts
+ * @section imports:internals
  */
 
-export const SUPPORTED_ASSETS = ["btc", "eth", "sol", "xrp"] as const;
-export const SUPPORTED_WINDOWS = ["5m", "15m"] as const;
-export const PROVIDER_KEYS = ["chainlink", "binance", "coinbase", "kraken", "okx"] as const;
-export const ORDERBOOK_SIDES = ["up", "down"] as const;
+import type { AssetWindow, SupportedAsset, SupportedWindow } from "../collector/index.ts";
 
 /**
  * @section types
  */
-
-export type SupportedAsset = (typeof SUPPORTED_ASSETS)[number];
-export type SupportedWindow = (typeof SUPPORTED_WINDOWS)[number];
-export type ProviderKey = (typeof PROVIDER_KEYS)[number];
-export type OrderBookSideKey = (typeof ORDERBOOK_SIDES)[number];
-export type ModelKey = `${SupportedAsset}-${SupportedWindow}`;
-
-export type AssetWindow = { asset: SupportedAsset; window: SupportedWindow };
 
 export type ModelMetadata = {
   modelVersion: string;
@@ -38,6 +27,7 @@ export type TrainingLedger = {
   lastTrainedSlug: string | null;
   lastTrainedAt: string | null;
   modelVersion: string;
+  recentTargetDeltas: number[];
 };
 
 export type ModelPredictionContext = {
@@ -45,6 +35,7 @@ export type ModelPredictionContext = {
   trainedMarketCount: number;
   modelVersion: string;
   hasCheckpoint: boolean;
+  recentReferenceDelta: number;
 };
 
 export type ModelSlotStatus = {
@@ -55,6 +46,19 @@ export type ModelSlotStatus = {
   trainedMarketCount: number;
   lastTrainedSlug: string | null;
   lastTrainedAt: string | null;
+  isTraining: boolean;
+  latestTrainingError: string | null;
+  checkpointPath: string;
+  ledgerPath: string;
+  recentReferenceDelta: number;
+};
+
+export type ModelSlotState = {
+  pair: AssetWindow;
+  model: import("@tensorflow/tfjs-node").LayersModel | null;
+  metadata: ModelMetadata | null;
+  ledger: TrainingLedger;
+  hasCheckpoint: boolean;
   isTraining: boolean;
   latestTrainingError: string | null;
   checkpointPath: string;

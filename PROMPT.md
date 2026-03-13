@@ -85,13 +85,14 @@ A la hora de entrenar, debes tener en cuenta las siguientes cosas:
   - Nuestro modelo debe tener como target el delta del precio del asset (que % acabara por debajo/arriba BTC, ETH, SOL, XRP respecto al price to beat)
   - Nuestro servicio nunca puede entrenar mas de un modelo a la vez, por un tema de recursos de máquina. El entreno debe ser secuencial, y balanceado entre pares window/asset.
   - El flujo de entreno debe ser resiliente, si se produce un error en el entreno de un mercado, escribimos log y pasamos al siguiente
-
+  - Me gustaria ver info por el log cuando se van acabando entrenos.
 
 Nuestro endpoint de predicciones decidirá si predice UP/DOWN para un par asset/window teniendo en cuenta el resultado del modelo (delta) y los ultimos deltas registrados. De forma que si el delta predecido es 
 muy superior a la media de los ultimos deltas registrados la confianza sera 1, si es muy inferior -1 (el resultado debe ser entre -1 y 1). Este comportamiento me gustaría controlarlo con algun tipo de factor.
 Del estilo... si el delta actual * N (N=0.75 por ejemplo) la confianza es 1
 
-Por ultimo, necesito un dashboard web (posiblemente temporal) donde poder ver el estado de los modelos entrenados y como de buenas van siendo sus predicciones. me gustaría ver:
+Por ultimo, necesito un dashboard web (posiblemente temporal) donde poder ver el estado de los modelos entrenados y como de buenas van siendo sus predicciones. 
+El objetivo es poder evaluar los modelos. Me gustaría ver:
 
   * El estado actual de los 8 mercados. Un widget por mercado, y separando claramente los mercados de 5m/15m. Quiero ver claramente si el mercado está UP o DOWN en cada momento. Esta info
     la podemos sacar del endpoint state de polymarket-snapshot-collector
@@ -104,14 +105,4 @@ Por ultimo, necesito un dashboard web (posiblemente temporal) donde poder ver el
 
   * Intenta hacer todo de la forma mas eficiente posible. Reduciendo llaamdas, etc. Si podemos usar caches "cortas" en memoria mejor.
 
-  Toda esta info debe ser visible facilmente en el mismo dahboard.
-
-
-
-
-
-
-  
-
-
-
+Toda esta info debe ser visible facilmente en el mismo dahboard.

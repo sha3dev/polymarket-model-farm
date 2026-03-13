@@ -1,14 +1,8 @@
 /**
- * @section imports:externals
- */
-
-import type { Snapshot } from "@sha3/polymarket-snapshot";
-
-/**
  * @section imports:internals
  */
 
-import type { SupportedAsset, SupportedWindow } from "../model/index.ts";
+import type { Snapshot, SupportedAsset, SupportedWindow } from "../collector/index.ts";
 
 /**
  * @section types
@@ -17,7 +11,7 @@ import type { SupportedAsset, SupportedWindow } from "../model/index.ts";
 export type PredictionMarketInput = {
   asset: SupportedAsset;
   window: SupportedWindow;
-  slug: string | null;
+  slug: string;
   marketStart: string;
   marketEnd: string;
   priceToBeat: number;
@@ -25,23 +19,21 @@ export type PredictionMarketInput = {
   snapshots: Snapshot[];
 };
 
-export type PredictionRequestPayload = {
-  markets: PredictionMarketInput[];
-};
-
 export type PredictionItem = {
-  slug: string | null;
+  slug: string;
   asset: SupportedAsset;
   window: SupportedWindow;
   snapshotCount: number;
+  progress: number;
   confidence: number;
   predictedDelta: number;
   predictedDirection: "UP" | "DOWN";
+  observedPrice: number;
   modelVersion: string;
   trainedMarketCount: number;
   generatedAt: string;
 };
 
-export type PredictionResponsePayload = {
-  predictions: PredictionItem[];
-};
+export type PredictionResponsePayload = { predictions: PredictionItem[] };
+
+export type PredictionFilter = { asset?: SupportedAsset; window?: SupportedWindow };

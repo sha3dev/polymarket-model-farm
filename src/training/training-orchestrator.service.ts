@@ -2,12 +2,14 @@
  * @section imports:internals
  */
 
-import { CollectorClientService } from "../collector-client/index.ts";
+import type { CollectorClientService } from "../collector/index.ts";
+import type { AssetWindow } from "../collector/index.ts";
+import { SUPPORTED_ASSETS, SUPPORTED_WINDOWS } from "../collector/index.ts";
 import config from "../config.ts";
+import type { MarketFeatureProjectorService } from "../feature/index.ts";
+import type { PredictionHistoryService } from "../history/index.ts";
 import LOGGER from "../logger.ts";
-import { SUPPORTED_ASSETS, SUPPORTED_WINDOWS } from "../model/index.ts";
-import type { AssetWindow, ModelRegistryService } from "../model/index.ts";
-import type { SnapshotFeatureProjectorService } from "../snapshot-feature/index.ts";
+import type { ModelRegistryService } from "../model/index.ts";
 import type { TrainingMarketCandidate, TrainingPairCycleResult } from "./index.ts";
 
 /**
@@ -17,7 +19,8 @@ import type { TrainingMarketCandidate, TrainingPairCycleResult } from "./index.t
 type TrainingOrchestratorServiceOptions = {
   collectorClientService: CollectorClientService;
   modelRegistryService: ModelRegistryService;
-  snapshotFeatureProjectorService: SnapshotFeatureProjectorService;
+  marketFeatureProjectorService: MarketFeatureProjectorService;
+  predictionHistoryService: PredictionHistoryService;
   now: () => number;
 };
 
@@ -30,7 +33,9 @@ export class TrainingOrchestratorService {
 
   private readonly modelRegistryService: ModelRegistryService;
 
-  private readonly snapshotFeatureProjectorService: SnapshotFeatureProjectorService;
+  private readonly marketFeatureProjectorService: MarketFeatureProjectorService;
+
+  private readonly predictionHistoryService: PredictionHistoryService;
 
   private readonly now: () => number;
 
@@ -49,7 +54,8 @@ export class TrainingOrchestratorService {
   public constructor(options: TrainingOrchestratorServiceOptions) {
     this.collectorClientService = options.collectorClientService;
     this.modelRegistryService = options.modelRegistryService;
-    this.snapshotFeatureProjectorService = options.snapshotFeatureProjectorService;
+    this.marketFeatureProjectorService = options.marketFeatureProjectorService;
+    this.predictionHistoryService = options.predictionHistoryService;
     this.now = options.now;
     this.loopTimer = null;
     this.isRunning = false;
@@ -61,26 +67,29 @@ export class TrainingOrchestratorService {
    * @section factory
    */
 
-  public static createDefault(modelRegistryService: ModelRegistryService, snapshotFeatureProjectorService: SnapshotFeatureProjectorService): TrainingOrchestratorService {
-    return new TrainingOrchestratorService({ collectorClientService: CollectorClientService.createDefault(), modelRegistryService, snapshotFeatureProjectorService, now: () => Date.now() });
+  public static createDefault(
+    collectorClientService: CollectorClientService,
+    modelRegistryService: ModelRegistryService,
+    marketFeatureProjectorService: MarketFeatureProjectorService,
+    predictionHistoryService: PredictionHistoryService,
+  ): TrainingOrchestratorService {
+    return new TrainingOrchestratorService({ collectorClientService, modelRegistryService, marketFeatureProjectorService, predictionHistoryService, now: () => Date.now() });
   }
 
   /**
    * @section private:methods
    */
 
-  private async runLoop(): Promise<void> {
-    while (this.isRunning) {
-      const cycleResults = await this.runTrainingCycle();
-      const hadWork = cycleResults.some((cycleResult) => cycleResult.hadWork);
-      const delayMs = hadWork ? config.TRAINING_POLL_INTERVAL_MS : config.TRAINING_IDLE_BACKOFF_MS;
-      await this.wait(delayMs);
-    }
+  private async wait(delayMs: number): Promise<void> {
+    await new Promise<void>((resolve) => {
+      this.loopTimer = setTimeout(() => {
+        this.loopTimer = null;
+        resolve();
+      }, delayMs);
+    });
   }
 
   private async acquireCycleSlot(): Promise<void> {
-    // Serialize full training cycles so the process cannot train multiple models at once
-    // when runTrainingCycle is triggered concurrently from different call sites.
     if (this.isCycleRunning) {
       await new Promise<void>((resolve) => {
         this.cycleWaiters.push(resolve);
@@ -98,48 +107,35 @@ export class TrainingOrchestratorService {
     }
   }
 
-  private async executeTrainingCycle(): Promise<TrainingPairCycleResult[]> {
-    const cycleResults: TrainingPairCycleResult[] = [];
-    for (const asset of SUPPORTED_ASSETS) {
-      for (const window of SUPPORTED_WINDOWS) {
-        const pair = { asset, window };
-        const pairResult = await this.runPairCycle(pair);
-        cycleResults.push(pairResult);
-      }
-    }
-    return cycleResults;
-  }
-
-  private async runPairCycle(pair: AssetWindow): Promise<TrainingPairCycleResult> {
-    let trainedMarketCount = 0;
-    const candidates = await this.collectTrainingCandidates(pair);
-    const marketLimit = Math.min(candidates.length, config.TRAINING_MAX_MARKETS_PER_CYCLE);
-    for (const candidate of candidates.slice(0, marketLimit)) {
-      try {
-        await this.trainCandidate(pair, candidate);
-        trainedMarketCount += 1;
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        this.modelRegistryService.setLatestTrainingError(pair, message);
-        LOGGER.error(`training cycle failed for ${pair.asset}/${pair.window}: ${message}`);
-      }
-    }
-    const result = { pair, trainedMarketCount, hadWork: candidates.length > 0 };
-    return result;
+  private buildCandidate(payload: TrainingMarketCandidate): TrainingMarketCandidate | null {
+    const finalSnapshot = payload.snapshots[payload.snapshots.length - 1] || null;
+    const maxSequenceLength = payload.window === "5m" ? 600 : 1800;
+    const hasPrevPriceToBeat = payload.prevPriceToBeat.length > 0;
+    const hasFinalChainlink = finalSnapshot?.chainlinkPrice !== null && finalSnapshot?.chainlinkPrice !== undefined;
+    const isValidLength = payload.snapshots.length > 0 && payload.snapshots.length <= maxSequenceLength;
+    const candidate = hasPrevPriceToBeat && hasFinalChainlink && isValidLength ? payload : null;
+    return candidate;
   }
 
   private async collectTrainingCandidates(pair: AssetWindow): Promise<TrainingMarketCandidate[]> {
     const marketSummaries = await this.collectorClientService.listMarkets(pair);
-    const nowTs = this.now();
     const candidates: TrainingMarketCandidate[] = [];
     for (const marketSummary of marketSummaries) {
-      const marketEndTs = Date.parse(marketSummary.marketEnd);
-      const hasClosed = marketEndTs <= nowTs - config.TRAINING_CLOSE_GRACE_MS;
+      const hasClosed = Date.parse(marketSummary.marketEnd) <= this.now() - config.TRAINING_CLOSE_GRACE_MS;
       const hasPriceToBeat = typeof marketSummary.priceToBeat === "number";
       const hasTrainedMarket = this.modelRegistryService.hasTrainedMarket(pair, marketSummary.slug);
       if (hasClosed && hasPriceToBeat && !hasTrainedMarket) {
         const marketPayload = await this.collectorClientService.loadMarketSnapshots(marketSummary.slug);
-        const candidate = this.buildCandidateFromPayload(pair, marketSummary.priceToBeat || 0, marketSummary.prevPriceToBeat || [], marketPayload);
+        const candidate = this.buildCandidate({
+          slug: marketPayload.slug,
+          asset: marketPayload.asset,
+          window: marketPayload.window,
+          priceToBeat: marketSummary.priceToBeat || 0,
+          prevPriceToBeat: marketSummary.prevPriceToBeat || [],
+          marketStart: marketPayload.marketStart,
+          marketEnd: marketPayload.marketEnd,
+          snapshots: marketPayload.snapshots,
+        });
         if (candidate) {
           candidates.push(candidate);
         }
@@ -148,56 +144,53 @@ export class TrainingOrchestratorService {
     return candidates;
   }
 
-  private buildCandidateFromPayload(
-    pair: AssetWindow,
-    priceToBeat: number,
-    prevPriceToBeat: number[],
-    marketPayload: TrainingMarketCandidate | { slug: string; marketStart: string; marketEnd: string; snapshots: TrainingMarketCandidate["snapshots"] },
-  ): TrainingMarketCandidate | null {
-    const snapshots = marketPayload.snapshots;
-    const finalSnapshot = snapshots[snapshots.length - 1] || null;
-    const maxSequenceLength = pair.window === "5m" ? 600 : 1800;
-    let candidate: TrainingMarketCandidate | null = null;
-    if (snapshots.length > 0 && snapshots.length <= maxSequenceLength && finalSnapshot?.chainlinkPrice !== null && finalSnapshot?.chainlinkPrice !== undefined) {
-      candidate = {
-        slug: marketPayload.slug,
-        asset: pair.asset,
-        window: pair.window,
-        priceToBeat,
-        prevPriceToBeat,
-        marketStart: marketPayload.marketStart,
-        marketEnd: marketPayload.marketEnd,
-        snapshots,
-      };
-    }
-    return candidate;
-  }
-
   private async trainCandidate(pair: AssetWindow, candidate: TrainingMarketCandidate): Promise<void> {
-    const projection = this.snapshotFeatureProjectorService.projectSequence({
-      asset: candidate.asset,
-      window: candidate.window,
-      marketStart: candidate.marketStart,
-      marketEnd: candidate.marketEnd,
-      priceToBeat: candidate.priceToBeat,
-      prevPriceToBeat: candidate.prevPriceToBeat,
-      snapshots: candidate.snapshots,
-    });
+    const featureProjection = this.marketFeatureProjectorService.projectSequence(candidate);
     const finalSnapshot = candidate.snapshots[candidate.snapshots.length - 1];
-    const rawDelta = ((finalSnapshot?.chainlinkPrice || candidate.priceToBeat) - candidate.priceToBeat) / candidate.priceToBeat;
-    const boundedTarget = Math.tanh(rawDelta / config.DELTA_TARGET_SCALE);
+    const finalChainlinkPrice = finalSnapshot?.chainlinkPrice || candidate.priceToBeat;
+    const rawTargetDelta = (finalChainlinkPrice - candidate.priceToBeat) / candidate.priceToBeat;
+    const boundedTarget = Math.tanh(rawTargetDelta / config.DELTA_TARGET_SCALE);
     const trainedAt = new Date(this.now()).toISOString();
-    await this.modelRegistryService.train(pair, projection.rows, boundedTarget);
-    await this.modelRegistryService.markMarketAsTrained(pair, candidate.slug, trainedAt);
+    await this.modelRegistryService.train(pair, featureProjection.rows, boundedTarget);
+    await this.modelRegistryService.markMarketAsTrained(pair, candidate.slug, trainedAt, rawTargetDelta);
+    await this.predictionHistoryService.resolvePrediction(pair, candidate.slug, rawTargetDelta);
   }
 
-  private async wait(delayMs: number): Promise<void> {
-    await new Promise<void>((resolve) => {
-      this.loopTimer = setTimeout(() => {
-        this.loopTimer = null;
-        resolve();
-      }, delayMs);
-    });
+  private async runPairCycle(pair: AssetWindow): Promise<TrainingPairCycleResult> {
+    const candidates = await this.collectTrainingCandidates(pair);
+    let trainedMarketCount = 0;
+    for (const candidate of candidates.slice(0, config.TRAINING_MAX_MARKETS_PER_CYCLE)) {
+      try {
+        await this.trainCandidate(pair, candidate);
+        trainedMarketCount += 1;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        this.modelRegistryService.setLatestTrainingError(pair, message);
+        LOGGER.error(`training market failed for ${pair.asset}/${pair.window}/${candidate.slug}: ${message}`);
+      }
+    }
+    if (candidates.length <= 2) {
+      LOGGER.info(`training backlog for ${pair.asset}/${pair.window} is ${candidates.length} closed market(s)`);
+    }
+    return { pair, trainedMarketCount, hadWork: candidates.length > 0, pendingClosedMarketCount: candidates.length };
+  }
+
+  private async executeTrainingCycle(): Promise<TrainingPairCycleResult[]> {
+    const cycleResults: TrainingPairCycleResult[] = [];
+    for (const asset of SUPPORTED_ASSETS) {
+      for (const window of SUPPORTED_WINDOWS) {
+        cycleResults.push(await this.runPairCycle({ asset, window }));
+      }
+    }
+    return cycleResults;
+  }
+
+  private async runLoop(): Promise<void> {
+    while (this.isRunning) {
+      const cycleResults = await this.runTrainingCycle();
+      const hasWork = cycleResults.some((cycleResult) => cycleResult.hadWork);
+      await this.wait(hasWork ? config.TRAINING_POLL_INTERVAL_MS : config.TRAINING_IDLE_BACKOFF_MS);
+    }
   }
 
   /**

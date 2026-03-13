@@ -8,8 +8,9 @@ import * as tf from "@tensorflow/tfjs-node";
  * @section imports:internals
  */
 
+import type { AssetWindow } from "../collector/index.ts";
 import config from "../config.ts";
-import type { AssetWindow, ModelMetadata } from "./index.ts";
+import type { ModelMetadata } from "./index.ts";
 
 /**
  * @section public:properties

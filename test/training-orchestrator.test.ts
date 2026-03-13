@@ -2,59 +2,43 @@ import * as assert from "node:assert/strict";
 import { test } from "node:test";
 import { setTimeout as wait } from "node:timers/promises";
 
-import type { Snapshot } from "@sha3/polymarket-snapshot";
-
-import { SUPPORTED_ASSETS, SUPPORTED_WINDOWS } from "../src/model/index.ts";
-import type { SupportedAsset, SupportedWindow } from "../src/model/index.ts";
+import type { Snapshot, SupportedAsset, SupportedWindow } from "../src/collector/index.ts";
+import { SUPPORTED_ASSETS, SUPPORTED_WINDOWS } from "../src/collector/index.ts";
 import { TrainingOrchestratorService } from "../src/training/index.ts";
 
-const BASE_TIMESTAMP = Date.parse("2026-03-12T00:00:00.000Z");
-
-test("TrainingOrchestratorService serializes concurrent training cycles", async () => {
+test("TrainingOrchestratorService serializes concurrent cycles across all pairs", async () => {
   const sequenceLog: string[] = [];
   let concurrentTrainCount = 0;
   let maxConcurrentTrainCount = 0;
 
-  const collectorClientService = {
-    listMarkets: async ({ asset, window }: { asset: SupportedAsset; window: SupportedWindow }) => [
-      {
-        slug: `${asset}-${window}-market`,
-        asset,
-        window,
-        priceToBeat: 100,
-        prevPriceToBeat: [99],
-        marketStart: "2026-03-12T00:00:00.000Z",
-        marketEnd: "2026-03-12T00:05:00.000Z",
+  const trainingOrchestratorService = new TrainingOrchestratorService({
+    collectorClientService: {
+      listMarkets: async ({ asset, window }: { asset: SupportedAsset; window: SupportedWindow }) => [
+        { slug: `${asset}-${window}-market`, asset, window, priceToBeat: 100, prevPriceToBeat: [99], marketStart: "2026-03-12T00:00:00.000Z", marketEnd: "2026-03-12T00:05:00.000Z" },
+      ],
+      loadMarketSnapshots: async (slug: string) => {
+        const [asset, window] = slug.split("-") as [SupportedAsset, SupportedWindow, string];
+        return { slug, asset, window, marketStart: "2026-03-12T00:00:00.000Z", marketEnd: "2026-03-12T00:05:00.000Z", snapshots: buildSnapshots(asset, window) };
       },
-    ],
-    loadMarketSnapshots: async (slug: string) => {
-      const [asset, window] = slug.split("-") as [SupportedAsset, SupportedWindow, string];
-      const snapshots = buildSnapshots(asset, window);
-      const payload = { slug, asset, window, marketStart: "2026-03-12T00:00:00.000Z", marketEnd: "2026-03-12T00:05:00.000Z", snapshots };
-      return payload;
-    },
-  } as unknown as ConstructorParameters<typeof TrainingOrchestratorService>[0]["collectorClientService"];
+    } as unknown as ConstructorParameters<typeof TrainingOrchestratorService>[0]["collectorClientService"],
+    modelRegistryService: {
+      hasTrainedMarket: () => false,
+      train: async (pair: { asset: SupportedAsset; window: SupportedWindow }) => {
+        concurrentTrainCount += 1;
+        maxConcurrentTrainCount = Math.max(maxConcurrentTrainCount, concurrentTrainCount);
+        sequenceLog.push(`${pair.asset}-${pair.window}`);
+        await wait(10);
+        concurrentTrainCount -= 1;
+      },
+      markMarketAsTrained: async () => {},
+      setLatestTrainingError: () => {},
+    } as unknown as ConstructorParameters<typeof TrainingOrchestratorService>[0]["modelRegistryService"],
+    marketFeatureProjectorService: { projectSequence: () => ({ labels: ["feature"], rows: [[1]], maxSequenceLength: 600 }) } as unknown as ConstructorParameters<typeof TrainingOrchestratorService>[0]["marketFeatureProjectorService"],
+    predictionHistoryService: { resolvePrediction: async () => {} } as unknown as ConstructorParameters<typeof TrainingOrchestratorService>[0]["predictionHistoryService"],
+    now: () => Date.parse("2026-03-12T01:00:00.000Z"),
+  });
 
-  const modelRegistryService = {
-    hasTrainedMarket: (_pair: { asset: SupportedAsset; window: SupportedWindow }, _slug: string) => false,
-    train: async (pair: { asset: SupportedAsset; window: SupportedWindow }, _sequence: number[][], _boundedTarget: number) => {
-      concurrentTrainCount += 1;
-      maxConcurrentTrainCount = Math.max(maxConcurrentTrainCount, concurrentTrainCount);
-      sequenceLog.push(`${pair.asset}-${pair.window}`);
-      await wait(20);
-      concurrentTrainCount -= 1;
-    },
-    markMarketAsTrained: async (_pair: { asset: SupportedAsset; window: SupportedWindow }, _slug: string, _trainedAt: string) => {},
-    setLatestTrainingError: () => {},
-  } as unknown as ConstructorParameters<typeof TrainingOrchestratorService>[0]["modelRegistryService"];
-
-  const snapshotFeatureProjectorService = { projectSequence: () => ({ rows: [[0.1, 0.2, 0.3]] }) } as unknown as ConstructorParameters<
-    typeof TrainingOrchestratorService
-  >[0]["snapshotFeatureProjectorService"];
-  const orchestratorNow = () => Date.parse("2026-03-12T01:00:00.000Z");
-  const service = new TrainingOrchestratorService({ collectorClientService, modelRegistryService, snapshotFeatureProjectorService, now: orchestratorNow });
-
-  await Promise.all([service.runTrainingCycle(), service.runTrainingCycle()]);
+  await Promise.all([trainingOrchestratorService.runTrainingCycle(), trainingOrchestratorService.runTrainingCycle()]);
 
   assert.equal(maxConcurrentTrainCount, 1);
   assert.deepEqual(sequenceLog, [...buildExpectedOrder(), ...buildExpectedOrder()]);
@@ -71,35 +55,13 @@ function buildExpectedOrder(): string[] {
 }
 
 function buildSnapshots(asset: SupportedAsset, window: SupportedWindow): Snapshot[] {
-  return [
-    buildSnapshot(asset, window, BASE_TIMESTAMP, 100.2),
-    buildSnapshot(asset, window, BASE_TIMESTAMP + 10_000, 100.6),
-    buildSnapshot(asset, window, BASE_TIMESTAMP + 20_000, 101.2),
-  ];
+  const baseTimestamp = Date.parse("2026-03-12T00:00:00.000Z");
+  return [buildSnapshot(asset, window, baseTimestamp, 100.2), buildSnapshot(asset, window, baseTimestamp + 10_000, 100.7), buildSnapshot(asset, window, baseTimestamp + 20_000, 101.1)];
 }
 
 function buildSnapshot(asset: SupportedAsset, window: SupportedWindow, generatedAt: number, chainlinkPrice: number): Snapshot {
-  const baseSnapshot = buildBaseSnapshot(asset, window, generatedAt);
-  const chainlinkOrderBook = buildExchangeOrderBook("chainlink", asset, generatedAt, chainlinkPrice);
-  return { ...baseSnapshot, chainlinkPrice, chainlinkOrderBook, chainlinkEventTs: generatedAt };
-}
-
-function buildBaseSnapshot(
-  asset: SupportedAsset,
-  window: SupportedWindow,
-  generatedAt: number,
-): Omit<Snapshot, "chainlinkPrice" | "chainlinkOrderBook" | "chainlinkEventTs"> {
-  const marketFields = buildMarketFields(asset, window, generatedAt);
-  const directionalFields = buildDirectionalFields(asset, window, generatedAt);
-  const exchangeFields = buildExchangeFields(asset, generatedAt);
-  return { ...marketFields, ...directionalFields, ...exchangeFields };
-}
-
-function buildMarketFields(
-  asset: SupportedAsset,
-  window: SupportedWindow,
-  generatedAt: number,
-): Pick<Snapshot, "asset" | "window" | "generatedAt" | "marketId" | "marketSlug" | "marketConditionId" | "marketStart" | "marketEnd" | "priceToBeat"> {
+  const providerOrderBook = buildProviderOrderBook(asset, generatedAt, chainlinkPrice);
+  const exchangeFields = buildExchangeFields(chainlinkPrice, generatedAt, providerOrderBook);
   return {
     asset,
     window,
@@ -110,30 +72,23 @@ function buildMarketFields(
     marketStart: "2026-03-12T00:00:00.000Z",
     marketEnd: "2026-03-12T00:05:00.000Z",
     priceToBeat: 100,
-  };
-}
-
-function buildDirectionalFields(
-  asset: SupportedAsset,
-  window: SupportedWindow,
-  generatedAt: number,
-): Pick<Snapshot, "upAssetId" | "upPrice" | "upOrderBook" | "upEventTs" | "downAssetId" | "downPrice" | "downOrderBook" | "downEventTs"> {
-  return {
-    upAssetId: `${asset}-${window}-up`,
+    upAssetId: "up",
     upPrice: 0.55,
-    upOrderBook: { bids: [{ price: 0.54, size: 10 }], asks: [{ price: 0.56, size: 12 }] },
+    upOrderBook: { bids: [{ price: 0.54, size: 1 }], asks: [{ price: 0.56, size: 1 }] },
     upEventTs: generatedAt,
-    downAssetId: `${asset}-${window}-down`,
+    downAssetId: "down",
     downPrice: 0.45,
-    downOrderBook: { bids: [{ price: 0.44, size: 9 }], asks: [{ price: 0.46, size: 10 }] },
+    downOrderBook: { bids: [{ price: 0.44, size: 1 }], asks: [{ price: 0.46, size: 1 }] },
     downEventTs: generatedAt,
+    ...exchangeFields,
   };
 }
 
-function buildExchangeFields(
-  asset: SupportedAsset,
-  generatedAt: number,
-): Pick<
+function buildProviderOrderBook(asset: SupportedAsset, generatedAt: number, price: number): NonNullable<Snapshot["binanceOrderBook"]> {
+  return { type: "orderbook", provider: "binance", symbol: asset, ts: generatedAt, bids: [{ price, size: 1 }], asks: [{ price, size: 1 }] };
+}
+
+function buildExchangeFields(chainlinkPrice: number, generatedAt: number, providerOrderBook: NonNullable<Snapshot["binanceOrderBook"]>): Pick<
   Snapshot,
   | "binancePrice"
   | "binanceOrderBook"
@@ -147,28 +102,25 @@ function buildExchangeFields(
   | "okxPrice"
   | "okxOrderBook"
   | "okxEventTs"
+  | "chainlinkPrice"
+  | "chainlinkOrderBook"
+  | "chainlinkEventTs"
 > {
   return {
-    binancePrice: 100.1,
-    binanceOrderBook: buildExchangeOrderBook("binance", asset, generatedAt, 100.1),
+    binancePrice: chainlinkPrice,
+    binanceOrderBook: { ...providerOrderBook, provider: "binance" },
     binanceEventTs: generatedAt,
-    coinbasePrice: 100.1,
-    coinbaseOrderBook: buildExchangeOrderBook("coinbase", asset, generatedAt, 100.1),
+    coinbasePrice: chainlinkPrice,
+    coinbaseOrderBook: { ...providerOrderBook, provider: "coinbase" },
     coinbaseEventTs: generatedAt,
-    krakenPrice: 100.1,
-    krakenOrderBook: buildExchangeOrderBook("kraken", asset, generatedAt, 100.1),
+    krakenPrice: chainlinkPrice,
+    krakenOrderBook: { ...providerOrderBook, provider: "kraken" },
     krakenEventTs: generatedAt,
-    okxPrice: 100.1,
-    okxOrderBook: buildExchangeOrderBook("okx", asset, generatedAt, 100.1),
+    okxPrice: chainlinkPrice,
+    okxOrderBook: { ...providerOrderBook, provider: "okx" },
     okxEventTs: generatedAt,
+    chainlinkPrice,
+    chainlinkOrderBook: { ...providerOrderBook, provider: "chainlink" },
+    chainlinkEventTs: generatedAt,
   };
-}
-
-function buildExchangeOrderBook(
-  provider: "binance" | "coinbase" | "kraken" | "okx" | "chainlink",
-  asset: SupportedAsset,
-  generatedAt: number,
-  price: number,
-): Snapshot["binanceOrderBook"] {
-  return { type: "orderbook", provider, symbol: asset, ts: generatedAt, bids: [{ price, size: 1 }], asks: [{ price, size: 1 }] };
 }

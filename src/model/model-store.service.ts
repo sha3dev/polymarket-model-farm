@@ -12,8 +12,9 @@ import * as tf from "@tensorflow/tfjs-node";
  * @section imports:internals
  */
 
+import type { AssetWindow } from "../collector/index.ts";
 import config from "../config.ts";
-import type { AssetWindow, ModelMetadata, TrainingLedger } from "./index.ts";
+import type { ModelMetadata, TrainingLedger } from "./index.ts";
 
 /**
  * @section types
@@ -49,27 +50,6 @@ export class ModelStoreService {
    * @section private:methods
    */
 
-  private async readJsonFile<TValue>(filePath: string): Promise<TValue | null> {
-    let parsedValue: TValue | null = null;
-    const hasFile = this.pathExists(filePath);
-    if (hasFile) {
-      const fileContent = await fs.readFile(filePath, "utf8");
-      parsedValue = JSON.parse(fileContent) as TValue;
-    }
-    return parsedValue;
-  }
-
-  private async writeJsonAtomically(filePath: string, value: unknown): Promise<void> {
-    const temporaryPath = `${filePath}.tmp`;
-    const payload = JSON.stringify(value, null, 2);
-    await fs.writeFile(temporaryPath, payload, "utf8");
-    await fs.rename(temporaryPath, filePath);
-  }
-
-  private pathExists(filePath: string): boolean {
-    return existsSync(filePath);
-  }
-
   private resolvePaths(pair: AssetWindow): ModelArtifactPaths {
     const pairDirectoryPath = path.resolve(this.storageDirectoryPath, `${pair.asset}-${pair.window}`);
     const modelDirectoryPath = path.resolve(pairDirectoryPath, "model");
@@ -82,6 +62,26 @@ export class ModelStoreService {
     };
   }
 
+  private pathExists(filePath: string): boolean {
+    const hasPath = existsSync(filePath);
+    return hasPath;
+  }
+
+  private async readJsonFile<TValue>(filePath: string): Promise<TValue | null> {
+    let parsedValue: TValue | null = null;
+    if (this.pathExists(filePath)) {
+      const fileContent = await fs.readFile(filePath, "utf8");
+      parsedValue = JSON.parse(fileContent) as TValue;
+    }
+    return parsedValue;
+  }
+
+  private async writeJsonFile(filePath: string, value: unknown): Promise<void> {
+    const temporaryPath = `${filePath}.tmp`;
+    await fs.writeFile(temporaryPath, JSON.stringify(value, null, 2), "utf8");
+    await fs.rename(temporaryPath, filePath);
+  }
+
   /**
    * @section public:methods
    */
@@ -91,7 +91,8 @@ export class ModelStoreService {
   }
 
   public describePaths(pair: AssetWindow): ModelArtifactPaths {
-    return this.resolvePaths(pair);
+    const paths = this.resolvePaths(pair);
+    return paths;
   }
 
   public async loadMetadata(pair: AssetWindow): Promise<ModelMetadata | null> {
@@ -106,9 +107,8 @@ export class ModelStoreService {
 
   public async loadModel(pair: AssetWindow): Promise<tf.LayersModel | null> {
     const paths = this.resolvePaths(pair);
-    const hasModel = this.pathExists(paths.modelJsonPath);
     let model: tf.LayersModel | null = null;
-    if (hasModel) {
+    if (this.pathExists(paths.modelJsonPath)) {
       model = await tf.loadLayersModel(pathToFileURL(paths.modelJsonPath).href);
     }
     return model;
@@ -119,12 +119,12 @@ export class ModelStoreService {
     await fs.mkdir(paths.pairDirectoryPath, { recursive: true });
     await fs.mkdir(paths.modelDirectoryPath, { recursive: true });
     await model.save(`file://${paths.modelDirectoryPath}`);
-    await this.writeJsonAtomically(paths.metadataPath, metadata);
+    await this.writeJsonFile(paths.metadataPath, metadata);
   }
 
   public async saveLedger(pair: AssetWindow, ledger: TrainingLedger): Promise<void> {
     const paths = this.resolvePaths(pair);
     await fs.mkdir(paths.pairDirectoryPath, { recursive: true });
-    await this.writeJsonAtomically(paths.ledgerPath, ledger);
+    await this.writeJsonFile(paths.ledgerPath, ledger);
   }
 }

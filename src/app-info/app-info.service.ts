@@ -3,12 +3,18 @@
  */
 
 import config from "../config.ts";
+import { SUPPORTED_ASSETS, SUPPORTED_WINDOWS } from "../collector/index.ts";
 
 /**
  * @section types
  */
 
-export type AppInfoPayload = { ok: true; serviceName: string };
+export type AppInfoPayload = {
+  ok: true;
+  serviceName: string;
+  supportedAssets: readonly string[];
+  supportedWindows: readonly string[];
+};
 
 type AppInfoServiceOptions = { serviceName: string };
 
@@ -40,6 +46,6 @@ export class AppInfoService {
    */
 
   public buildPayload(): AppInfoPayload {
-    return { ok: true, serviceName: this.serviceName };
+    return { ok: true, serviceName: this.serviceName, supportedAssets: SUPPORTED_ASSETS, supportedWindows: SUPPORTED_WINDOWS };
   }
 }

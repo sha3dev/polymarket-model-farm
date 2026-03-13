@@ -1,14 +1,8 @@
 /**
- * @section imports:externals
- */
-
-import type { Snapshot } from "@sha3/polymarket-snapshot";
-
-/**
  * @section imports:internals
  */
 
-import type { AssetWindow, SupportedAsset, SupportedWindow } from "../model/index.ts";
+import type { AssetWindow, Snapshot, SupportedAsset, SupportedWindow } from "../collector/index.ts";
 
 /**
  * @section types
@@ -29,4 +23,5 @@ export type TrainingPairCycleResult = {
   pair: AssetWindow;
   trainedMarketCount: number;
   hadWork: boolean;
+  pendingClosedMarketCount: number;
 };
