@@ -6,7 +6,7 @@ const config = {
   RESPONSE_CONTENT_TYPE: ENV.RESPONSE_CONTENT_TYPE || "application/json",
   HTML_CONTENT_TYPE: "text/html; charset=utf-8",
   DEFAULT_PORT: Number(ENV.PORT || 3100),
-  HTTP_HOST: ENV.HTTP_HOST || "127.0.0.1",
+  HTTP_HOST: ENV.HTTP_HOST || "0.0.0.0",
   SERVICE_NAME: ENV.SERVICE_NAME || "@sha3/polymarket-model-farm",
   COLLECTOR_BASE_URL: ENV.COLLECTOR_BASE_URL || "http://localhost:3000",
   MODEL_STORAGE_DIR: ENV.MODEL_STORAGE_DIR || "./var/model",

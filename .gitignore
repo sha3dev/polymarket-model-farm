@@ -4,3 +4,4 @@ coverage/
 .code-standards/
 *.tsbuildinfo
 .DS_Store
+var/
