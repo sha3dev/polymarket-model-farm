@@ -17,12 +17,12 @@ const DASHBOARD_PAGE_STYLES = `
   h1, h2, h3, h4, p { margin: 0; }
   .update-bar, .card, .history-panel { border: 1px solid var(--line); background: var(--panel); }
   .update-bar { display: flex; justify-content: space-between; gap: 12px; align-items: center; padding: 10px 12px; border-radius: 16px; margin-bottom: 12px; }
-  .eyebrow, .hint-label, th { display: block; text-transform: uppercase; letter-spacing: 0.14em; font-size: 10px; color: var(--muted); }
+  .eyebrow, .hint-label, th { display: block; text-transform: uppercase; letter-spacing: 0.14em; font-size: 9px; color: var(--muted); }
   .update-bar p, .section-heading p, .history-caption { color: var(--muted); line-height: 1.45; }
-  .update-value, .fact-value { display: block; margin-top: 4px; font-size: 16px; color: var(--text); }
+  .update-value, .fact-value { display: block; margin-top: 4px; font-size: 14px; color: var(--text); }
   .section-heading { display: flex; justify-content: space-between; gap: 12px; align-items: end; margin: 14px 0 8px; }
-  .section-heading h2 { font-size: 16px; letter-spacing: -0.02em; }
-  .section-heading p { font-size: 12px; }
+  .section-heading h2 { font-size: 14px; letter-spacing: -0.02em; }
+  .section-heading p { font-size: 11px; }
   .window-row { overflow-x: auto; padding-bottom: 6px; scrollbar-width: thin; scrollbar-color: rgba(125, 198, 255, 0.45) transparent; }
   .window-row::-webkit-scrollbar { height: 8px; }
   .window-row::-webkit-scrollbar-thumb { background: rgba(125, 198, 255, 0.45); border-radius: 999px; }
@@ -33,16 +33,16 @@ const DASHBOARD_PAGE_STYLES = `
   .card.flat { box-shadow: inset 0 0 0 1px rgba(244, 200, 106, 0.24); }
   .card-header, .status-row, .history-header { display: flex; justify-content: space-between; gap: 12px; align-items: start; }
   .card-header { margin-bottom: 8px; }
-  .card-title h3 { font-size: 17px; letter-spacing: -0.02em; }
-  .card-title p { margin-top: 2px; color: var(--muted); font-size: 11px; }
-  .direction-pill { min-width: 74px; text-align: center; border-radius: 999px; padding: 7px 9px; font-size: 10px; letter-spacing: 0.15em; text-transform: uppercase; background: rgba(255,255,255,0.05); }
+  .card-title h3 { font-size: 15px; letter-spacing: -0.02em; }
+  .card-title p { margin-top: 2px; color: var(--muted); font-size: 10px; }
+  .direction-pill { min-width: 68px; text-align: center; border-radius: 999px; padding: 6px 8px; font-size: 9px; letter-spacing: 0.15em; text-transform: uppercase; background: rgba(255,255,255,0.05); }
   .card.up .direction-pill, .card.up .direction-value { color: var(--up); }
   .card.down .direction-pill, .card.down .direction-value { color: var(--down); }
   .card.flat .direction-pill, .card.flat .direction-value { color: var(--flat); }
   .status-row { margin-bottom: 8px; padding: 0 0 8px; border-bottom: 1px solid rgba(255,255,255,0.08); }
-  .direction-value { display: block; font-size: 20px; font-weight: 700; letter-spacing: -0.03em; }
+  .direction-value { display: block; font-size: 17px; font-weight: 700; letter-spacing: -0.03em; }
   .progress-shell { margin-top: 6px; min-width: 120px; }
-  .progress-header { display: flex; justify-content: space-between; gap: 12px; font-size: 11px; color: var(--soft); margin-bottom: 6px; }
+  .progress-header { display: flex; justify-content: space-between; gap: 12px; font-size: 10px; color: var(--soft); margin-bottom: 6px; }
   .progress-track { width: 100%; height: 6px; border-radius: 999px; overflow: hidden; background: rgba(255,255,255,0.08); }
   .progress-track span { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), #b6f5d2); }
   .fact-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); column-gap: 14px; row-gap: 6px; margin: 8px 0 0; padding: 0; list-style: none; }
@@ -53,11 +53,11 @@ const DASHBOARD_PAGE_STYLES = `
   .history-panel summary { display: flex; justify-content: space-between; gap: 12px; align-items: center; cursor: pointer; list-style: none; }
   .history-panel summary::-webkit-details-marker { display: none; }
   .history-panel[open] summary { margin-bottom: 8px; }
-  .history-toggle { color: var(--soft); font-size: 11px; }
-  .history-header h4 { font-size: 13px; }
-  table { width: 100%; border-collapse: collapse; font-size: 11px; }
-  th, td { text-align: left; padding: 7px 0; border-bottom: 1px solid rgba(255,255,255,0.07); }
-  td { color: var(--soft); font-size: 11px; }
+  .history-toggle { color: var(--soft); font-size: 10px; }
+  .history-header h4 { font-size: 12px; }
+  table { width: 100%; border-collapse: collapse; font-size: 10px; }
+  th, td { text-align: left; padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.07); }
+  td { color: var(--soft); font-size: 10px; }
   .empty-cell { color: var(--muted); }
   @media (max-width: 720px) { main { width: min(100vw - 16px, 1700px); padding-top: 12px; } .fact-list, .grid { grid-template-columns: 1fr; } .window-row { overflow: visible; } .grid { min-width: auto; } .update-bar, .section-heading, .card-header, .status-row, .history-header, .progress-header { flex-direction: column; align-items: start; } }
 `;
