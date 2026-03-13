@@ -8,7 +8,7 @@ test("PredictionService converts model delta into directional confidence", async
   const predictionService = new PredictionService({
     modelRegistryService: {
       predict: async () => 0.5,
-      getPredictionContext: () => ({ metadata: null, trainedMarketCount: 12, modelVersion: "model-v1", hasCheckpoint: true, recentReferenceDelta: 0.004 }),
+      getPredictionContext: () => ({ metadata: null, trainedMarketCount: 120, modelVersion: "model-v1", hasCheckpoint: true, recentReferenceDelta: 0.004 }),
     } as unknown as ConstructorParameters<typeof PredictionService>[0]["modelRegistryService"],
     marketFeatureProjectorService: { projectSequence: () => ({ labels: ["progress"], rows: [[0.5]], maxSequenceLength: 600 }) } as unknown as ConstructorParameters<typeof PredictionService>[0]["marketFeatureProjectorService"],
     now: () => "2026-03-13T00:00:00.000Z",
@@ -35,6 +35,19 @@ test("PredictionService rejects markets without historical price-to-beat", async
   });
 
   await assert.rejects(async () => predictionService.buildPrediction({ ...buildMarketInput(), prevPriceToBeat: [] }), /prevPriceToBeat/);
+});
+
+test("PredictionService rejects pairs with fewer than 100 trained markets", async () => {
+  const predictionService = new PredictionService({
+    modelRegistryService: {
+      predict: async () => 0.2,
+      getPredictionContext: () => ({ metadata: null, trainedMarketCount: 99, modelVersion: "model-v1", hasCheckpoint: true, recentReferenceDelta: 0.003 }),
+    } as unknown as ConstructorParameters<typeof PredictionService>[0]["modelRegistryService"],
+    marketFeatureProjectorService: { projectSequence: () => ({ labels: ["progress"], rows: [[0.5]], maxSequenceLength: 600 }) } as unknown as ConstructorParameters<typeof PredictionService>[0]["marketFeatureProjectorService"],
+    now: () => "2026-03-13T00:00:00.000Z",
+  });
+
+  await assert.rejects(async () => predictionService.buildPrediction(buildMarketInput()), /at least 100 trained markets/);
 });
 
 function buildMarketInput(): PredictionMarketInput {

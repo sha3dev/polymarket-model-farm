@@ -68,11 +68,7 @@ export class PredictionHistoryService {
   }
 
   private normalizeEntry(entry: PredictionHistoryEntry): PredictionHistoryEntry {
-    const normalizedEntry = {
-      ...entry,
-      upPrice: entry.upPrice ?? null,
-      downPrice: entry.downPrice ?? null,
-    };
+    const normalizedEntry = { ...entry, upPrice: entry.upPrice ?? null, downPrice: entry.downPrice ?? null };
     return normalizedEntry;
   }
 

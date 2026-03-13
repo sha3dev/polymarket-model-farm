@@ -103,12 +103,25 @@ export class PredictionService {
     }
   }
 
+  private assertPredictionReadiness(market: PredictionMarketInput): void {
+    const predictionContext = this.modelRegistryService.getPredictionContext({ asset: market.asset, window: market.window });
+    if (!predictionContext.hasCheckpoint) {
+      throw new Error(`model checkpoint is not available for ${market.asset}/${market.window}`);
+    }
+    if (predictionContext.trainedMarketCount < config.MIN_TRAINED_MARKETS_FOR_PREDICTION) {
+      throw new Error(
+        `prediction requires at least ${config.MIN_TRAINED_MARKETS_FOR_PREDICTION} trained markets for ${market.asset}/${market.window}`,
+      );
+    }
+  }
+
   /**
    * @section public:methods
    */
 
   public async buildPrediction(market: PredictionMarketInput): Promise<PredictionItem> {
     this.assertValidMarketInput(market);
+    this.assertPredictionReadiness(market);
     const featureProjection = this.marketFeatureProjectorService.projectSequence(market);
     const boundedPrediction = await this.modelRegistryService.predict({ asset: market.asset, window: market.window }, featureProjection.rows);
     const predictedDelta = Math.atanh(this.clamp(boundedPrediction, -0.999999, 0.999999)) * config.DELTA_TARGET_SCALE;

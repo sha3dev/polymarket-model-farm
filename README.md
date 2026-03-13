@@ -10,7 +10,7 @@ npm run check
 npm run start
 ```
 
-Then open `http://127.0.0.1:3000/dashboard`.
+Then open `http://0.0.0.0:3000/dashboard`.
 
 ## Why
 
@@ -79,7 +79,7 @@ npm install
 npm run start
 ```
 
-Default bind: `http://127.0.0.1:3000`.
+Default bind: `http://0.0.0.0:3000`.
 
 ## Examples
 
@@ -333,6 +333,7 @@ All runtime defaults live in `src/config.ts`.
 - `config.TRAINING_CLOSE_GRACE_MS`: grace period after market end before training.
 - `config.DELTA_TARGET_SCALE`: scale used to squash raw deltas into the `tanh` training target.
 - `config.RECENT_TARGET_DELTA_LIMIT`: rolling window size for recent observed target deltas.
+- `config.MIN_TRAINED_MARKETS_FOR_PREDICTION`: minimum closed-market count required before a slot can emit live predictions.
 - `config.PREDICTION_HISTORY_LIMIT`: maximum stored live predictions per pair.
 - `config.CONFIDENCE_DELTA_FACTOR`: factor that maps predicted delta versus recent reference deltas into confidence.
 - `config.LIVE_PREDICTION_PROGRESS`: progress threshold that triggers the one-shot live prediction.

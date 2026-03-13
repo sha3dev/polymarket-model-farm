@@ -1,0 +1,29 @@
+<section class="card {{DASHBOARD_CARD_DIRECTION_CLASS}}">
+  <header class="card-header">
+    <div class="card-title">
+      <h3>{{DASHBOARD_CARD_TITLE}}</h3>
+      <p>{{DASHBOARD_CARD_STATUS}}</p>
+    </div>
+    <div class="direction-pill">{{DASHBOARD_CARD_DIRECTION}}</div>
+  </header>
+  <section class="status-row">
+    <div>
+      <span class="hint-label" title="Current model direction for the live market.">Latest call</span>
+      <strong class="direction-value">{{DASHBOARD_PREDICTION_DIRECTION}}</strong>
+    </div>
+    <div class="progress-shell">
+      <div class="progress-header">
+        <span class="hint-label" title="Elapsed share between market start and market end.">Market progress</span>
+        <strong>{{DASHBOARD_PROGRESS_PERCENT}}%</strong>
+      </div>
+      <div class="progress-track">
+        <span style="width:{{DASHBOARD_PROGRESS_PERCENT}}%"></span>
+      </div>
+    </div>
+  </section>
+  <ul class="fact-list">{{DASHBOARD_CARD_FACTS}}</ul>
+  <footer class="card-actions">
+    <button class="history-button" type="button" data-history-button="{{DASHBOARD_HISTORY_KEY}}">History</button>
+    <span class="history-count">{{DASHBOARD_HISTORY_ROW_COUNT}} rows</span>
+  </footer>
+</section>
