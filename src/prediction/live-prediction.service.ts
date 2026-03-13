@@ -2,7 +2,8 @@
  * @section imports:internals
  */
 
-import type { CollectorClientService } from "../collector/index.ts";
+import { SUPPORTED_ASSETS, SUPPORTED_WINDOWS } from "../collector/index.ts";
+import type { AssetWindow, CollectorClientService } from "../collector/index.ts";
 import type { CollectorStateMarket } from "../collector/index.ts";
 import config from "../config.ts";
 import type { PredictionHistoryService } from "../history/index.ts";
@@ -15,11 +16,19 @@ import type { PredictionService } from "./prediction.service.ts";
  * @section types
  */
 
+const RESOLUTION_RETRY_DELAY_MS = 30000;
+
 type LivePredictionServiceOptions = {
   collectorClientService: CollectorClientService;
   predictionService: PredictionService;
   predictionHistoryService: PredictionHistoryService;
   now: () => string;
+};
+
+type PendingResolutionEntry = {
+  pair: AssetWindow;
+  entry: PredictionHistoryEntry;
+  nextAttemptAtTs: number;
 };
 
 /**
@@ -41,6 +50,10 @@ export class LivePredictionService {
 
   private isRefreshing: boolean;
 
+  private readonly pendingResolutionMap: Map<string, PendingResolutionEntry>;
+
+  private hasInitializedPendingResolutions: boolean;
+
   /**
    * @section constructor
    */
@@ -53,6 +66,8 @@ export class LivePredictionService {
     this.loopTimer = null;
     this.isRunning = false;
     this.isRefreshing = false;
+    this.pendingResolutionMap = new Map();
+    this.hasInitializedPendingResolutions = false;
   }
 
   /**
@@ -89,6 +104,90 @@ export class LivePredictionService {
     return isPairSelected;
   }
 
+  private buildPendingResolutionKey(pair: AssetWindow, slug: string): string {
+    const pendingResolutionKey = `${pair.asset}-${pair.window}-${slug}`;
+    return pendingResolutionKey;
+  }
+
+  private trackPendingResolution(pair: AssetWindow, entry: PredictionHistoryEntry): void {
+    const currentTs = Date.parse(this.now());
+    this.pendingResolutionMap.set(this.buildPendingResolutionKey(pair, entry.slug), { pair, entry, nextAttemptAtTs: Number.isNaN(currentTs) ? 0 : currentTs });
+  }
+
+  private untrackPendingResolution(pair: AssetWindow, slug: string): void {
+    this.pendingResolutionMap.delete(this.buildPendingResolutionKey(pair, slug));
+  }
+
+  private canAttemptResolution(pendingResolution: PendingResolutionEntry): boolean {
+    const currentTs = Date.parse(this.now());
+    const canAttemptResolution = !Number.isNaN(currentTs) && currentTs >= pendingResolution.nextAttemptAtTs;
+    return canAttemptResolution;
+  }
+
+  private reschedulePendingResolution(pendingResolution: PendingResolutionEntry): void {
+    const currentTs = Date.parse(this.now());
+    if (!Number.isNaN(currentTs)) {
+      pendingResolution.nextAttemptAtTs = currentTs + RESOLUTION_RETRY_DELAY_MS;
+    }
+  }
+
+  private hasClosedHistoryEntry(entry: PredictionHistoryEntry): boolean {
+    const marketEndTs = Date.parse(entry.marketEnd);
+    const currentTs = Date.parse(this.now());
+    const hasClosedHistoryEntry = !Number.isNaN(marketEndTs) && !Number.isNaN(currentTs) && marketEndTs <= currentTs - config.TRAINING_CLOSE_GRACE_MS;
+    return hasClosedHistoryEntry;
+  }
+
+  private readResolvedDelta(upPrice: number | null, downPrice: number | null): number | null {
+    const actualDelta = upPrice === null || downPrice === null ? null : upPrice - downPrice;
+    return actualDelta;
+  }
+
+  private async initializePendingResolutions(): Promise<void> {
+    if (!this.hasInitializedPendingResolutions) {
+      for (const asset of SUPPORTED_ASSETS) {
+        for (const window of SUPPORTED_WINDOWS) {
+          const pair = { asset, window };
+          const history = await this.predictionHistoryService.loadHistory(pair);
+          for (const entry of history.entries) {
+            if (entry.actualDirection === null) {
+              this.trackPendingResolution(pair, entry);
+            }
+          }
+        }
+      }
+      this.hasInitializedPendingResolutions = true;
+    }
+  }
+
+  private async resolveTrackedPrediction(pendingResolution: PendingResolutionEntry): Promise<void> {
+    const { pair, entry } = pendingResolution;
+    if (this.hasClosedHistoryEntry(entry) && this.canAttemptResolution(pendingResolution)) {
+      try {
+        const marketPayload = await this.collectorClientService.loadMarketSnapshots(entry.slug);
+        const finalSnapshot = marketPayload.snapshots[marketPayload.snapshots.length - 1] || null;
+        const actualDelta = this.readResolvedDelta(finalSnapshot?.upPrice || null, finalSnapshot?.downPrice || null);
+        if (actualDelta !== null) {
+          await this.predictionHistoryService.resolvePrediction(pair, entry.slug, actualDelta);
+          this.untrackPendingResolution(pair, entry.slug);
+        } else {
+          this.reschedulePendingResolution(pendingResolution);
+        }
+      } catch (error) {
+        this.reschedulePendingResolution(pendingResolution);
+        const message = error instanceof Error ? error.message : String(error);
+        LOGGER.error(`history resolution failed for ${entry.slug}: ${message}`);
+      }
+    }
+  }
+
+  private async resolveClosedPredictions(): Promise<void> {
+    await this.initializePendingResolutions();
+    for (const pendingResolution of this.pendingResolutionMap.values()) {
+      await this.resolveTrackedPrediction(pendingResolution);
+    }
+  }
+
   private async buildHistoryEntry(item: PredictionItem, marketState: CollectorStateMarket): Promise<PredictionHistoryEntry> {
     const market = marketState.market;
     const latestSnapshot = marketState.latestSnapshot;
@@ -114,6 +213,11 @@ export class LivePredictionService {
       actualDirection: null,
       isCorrect: null,
     };
+  }
+
+  private async recordMarketPrediction(pair: AssetWindow, historyEntry: PredictionHistoryEntry): Promise<void> {
+    await this.predictionHistoryService.recordPrediction(pair, historyEntry);
+    this.trackPendingResolution(pair, historyEntry);
   }
 
   private async readCurrentPredictionItem(marketState: CollectorStateMarket): Promise<PredictionItem | null> {
@@ -160,7 +264,7 @@ export class LivePredictionService {
             prevPriceToBeat: market.prevPriceToBeat || [],
             snapshots: marketPayload.snapshots,
           });
-          await this.predictionHistoryService.recordPrediction(pair, await this.buildHistoryEntry(prediction, marketState));
+          await this.recordMarketPrediction(pair, await this.buildHistoryEntry(prediction, marketState));
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           LOGGER.error(`live prediction failed for ${market.slug}: ${message}`);
@@ -208,6 +312,7 @@ export class LivePredictionService {
         for (const marketState of statePayload.markets) {
           await this.refreshMarketPrediction(marketState);
         }
+        await this.resolveClosedPredictions();
       } finally {
         this.isRefreshing = false;
       }

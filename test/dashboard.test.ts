@@ -127,6 +127,25 @@ test("DashboardService renders the live dashboard with polling and compact histo
             actualDirection: "UP",
             isCorrect: true,
           },
+          {
+            slug: "btc-up-or-down-march-13b",
+            asset: "btc",
+            window: "5m",
+            marketStart: "2026-03-13T00:05:00.000Z",
+            marketEnd: "2026-03-13T00:10:00.000Z",
+            predictionMadeAt: "2026-03-13T00:08:00.000Z",
+            progressWhenPredicted: 0.6,
+            observedPrice: 100,
+            upPrice: 0.9,
+            downPrice: 0.12,
+            predictedDelta: 0.01,
+            confidence: 0.7,
+            predictedDirection: "UP",
+            modelVersion: "model-btc-5m",
+            actualDelta: -0.2,
+            actualDirection: "DOWN",
+            isCorrect: false,
+          },
         ],
       }),
     } as unknown as ConstructorParameters<typeof DashboardService>[0]["predictionHistoryService"],
@@ -139,12 +158,17 @@ test("DashboardService renders the live dashboard with polling and compact histo
 
   assert.match(htmlDocument, /Last update/);
   assert.match(htmlDocument, /BTC 5m/);
+  assert.match(htmlDocument, /class="latest-call up"/);
   assert.match(htmlDocument, />101\.25</);
   assert.match(htmlDocument, />0\.540</);
-  assert.match(htmlDocument, />100%<\/strong>/);
+  assert.match(htmlDocument, />-22\.0%<\/strong>/);
+  assert.match(htmlDocument, />50%<\/strong>/);
   assert.match(htmlDocument, /data-history-button="btc-5m"/);
   assert.match(htmlDocument, /id="history-modal"/);
   assert.match(htmlDocument, /window\.fetch\("\/api\/dashboard"/);
   assert.doesNotMatch(htmlDocument, /window\.location\.reload/);
   assert.doesNotMatch(htmlDocument, /<th>Slug<\/th>/);
+  assert.doesNotMatch(htmlDocument, />Updated<\/span>/);
+  assert.doesNotMatch(htmlDocument, />UP price<\/span>/);
+  assert.doesNotMatch(htmlDocument, />DOWN price<\/span>/);
 });

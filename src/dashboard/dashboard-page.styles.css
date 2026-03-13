@@ -24,10 +24,14 @@ h1, h2, h3, h4, p, button { margin: 0; }
 .card-title h3 { font-size: 15px; letter-spacing: -0.02em; }
 .card-title p { margin-top: 2px; color: var(--muted); font-size: 10px; }
 .direction-pill { min-width: 68px; text-align: center; border-radius: 999px; padding: 6px 8px; font-size: 9px; letter-spacing: 0.15em; text-transform: uppercase; background: rgba(255,255,255,0.05); }
-.card.up .direction-pill, .card.up .direction-value { color: var(--up); }
-.card.down .direction-pill, .card.down .direction-value { color: var(--down); }
-.card.flat .direction-pill, .card.flat .direction-value { color: var(--flat); }
+.card.up .direction-pill { color: var(--up); }
+.card.down .direction-pill { color: var(--down); }
+.card.flat .direction-pill { color: var(--flat); }
 .status-row { margin-bottom: 8px; padding: 0 0 8px; border-bottom: 1px solid rgba(255,255,255,0.08); }
+.latest-call.waiting .direction-value, .latest-call.idle .direction-value { color: var(--muted); }
+.latest-call.up .direction-value { color: var(--up); }
+.latest-call.down .direction-value { color: var(--down); }
+.latest-call.waiting .hint-label, .latest-call.idle .hint-label { color: rgba(141, 162, 187, 0.72); }
 .direction-value { display: block; font-size: 14px; font-weight: 600; letter-spacing: -0.02em; }
 .progress-shell { margin-top: 6px; min-width: 120px; }
 .progress-header { display: flex; justify-content: space-between; gap: 12px; font-size: 10px; color: var(--soft); margin-bottom: 6px; }

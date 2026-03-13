@@ -24,6 +24,7 @@ export type DashboardModelCard = {
   pendingClosedMarketCount: number;
   resolvedPredictionCount: number;
   correctPredictionCount: number;
+  hitRatePercent: number | null;
   scorePercent: number | null;
   modelStatus: ModelSlotStatus;
   latestPrediction: PredictionHistoryEntry | null;

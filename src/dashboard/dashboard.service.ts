@@ -95,13 +95,20 @@ export class DashboardService {
   private readScore(predictionHistory: DashboardModelCard["predictionHistory"]): {
     resolvedPredictionCount: number;
     correctPredictionCount: number;
+    hitRatePercent: number | null;
     scorePercent: number | null;
   } {
     const resolvedEntries = predictionHistory.filter((entry) => entry.actualDirection !== null);
     const resolvedPredictionCount = resolvedEntries.length;
     const correctPredictionCount = resolvedEntries.filter((entry) => entry.isCorrect === true).length;
-    const scorePercent = resolvedPredictionCount === 0 ? null : (correctPredictionCount / resolvedPredictionCount) * 100;
-    return { resolvedPredictionCount, correctPredictionCount, scorePercent };
+    const realizedEdge = resolvedEntries.reduce((sum, entry) => {
+      const entryPrice = entry.predictedDirection === "UP" ? entry.upPrice : entry.downPrice;
+      const tradeScore = entryPrice === null ? 0 : entry.isCorrect === true ? 1 - entryPrice : -entryPrice;
+      return sum + tradeScore;
+    }, 0);
+    const hitRatePercent = resolvedPredictionCount === 0 ? null : (correctPredictionCount / resolvedPredictionCount) * 100;
+    const scorePercent = resolvedPredictionCount === 0 ? null : (realizedEdge / resolvedPredictionCount) * 100;
+    return { resolvedPredictionCount, correctPredictionCount, hitRatePercent, scorePercent };
   }
 
   private async buildCard(
@@ -127,6 +134,7 @@ export class DashboardService {
       pendingClosedMarketCount: await this.readPendingClosedMarketCount(modelStatus),
       resolvedPredictionCount: score.resolvedPredictionCount,
       correctPredictionCount: score.correctPredictionCount,
+      hitRatePercent: score.hitRatePercent,
       scorePercent: score.scorePercent,
       modelStatus,
       latestPrediction,

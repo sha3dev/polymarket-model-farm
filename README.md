@@ -154,7 +154,7 @@ Returns a lightweight HTML dashboard for manual evaluation.
 
 ## Feature Engineering
 
-Each snapshot becomes one row with `91` features. The model sees the full ordered sequence from market open to the current snapshot.
+Each snapshot becomes one row with `89` features. The model sees the full ordered sequence from market open to the current snapshot.
 
 ### Market context features
 
@@ -185,12 +185,11 @@ These are intentionally exchange-separated. The service does not average venues 
 
 ### Cross-exchange structure features
 
-- `exchange-price-range-normalized`
-- `exchange-stddev-normalized`
-- `exchange-source-count-normalized`
-- `chainlink-vs-exchange-median`
+- `external-price-range-normalized`
+- `external-stddev-normalized`
+- `external-source-count-normalized`
 
-These summarize disagreement across tradable exchanges and the current Chainlink dislocation versus the exchange median.
+These summarize disagreement and coverage across external providers.
 
 ### Polymarket state features
 
@@ -200,8 +199,7 @@ These summarize disagreement across tradable exchanges and the current Chainlink
 - `up-mid`
 - `down-mid`
 - `up-mid-minus-down-mid`
-- `polymarket-overround`
-- `polymarket-mid-overround`
+- `polymarket-gap-vs-external`
 
 ### Polymarket order book features
 

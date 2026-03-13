@@ -74,8 +74,6 @@ export class DashboardPageService {
   private renderMarketFacts(card: DashboardModelCard): string {
     const predictedContractPrice = this.readPredictedContractPrice(card);
     const predictedContractPriceValue = predictedContractPrice === null ? "--" : predictedContractPrice.toFixed(3);
-    const upContractPrice = card.latestPrediction?.upPrice ?? null;
-    const downContractPrice = card.latestPrediction?.downPrice ?? null;
     const referencePrice = card.referencePrice === null ? "N/A" : card.referencePrice.toFixed(2);
     const targetPrice = card.priceToBeat === null ? "N/A" : card.priceToBeat.toFixed(2);
     const liveUpPrice = card.liveUpPrice === null ? "--" : card.liveUpPrice.toFixed(3);
@@ -86,34 +84,21 @@ export class DashboardPageService {
       this.renderFact("Live DOWN", liveDownPrice, "Current DOWN contract price from the latest collector snapshot."),
       this.renderFact("Target", targetPrice, "Strike price the market must finish above or below."),
       this.renderFact("Entry price", predictedContractPriceValue, "Polymarket contract price we would have bought following the predicted side."),
-      this.renderFact(
-        "UP price",
-        upContractPrice === null ? "--" : upContractPrice.toFixed(3),
-        "UP contract price at the exact moment the prediction was stored.",
-      ),
-      this.renderFact(
-        "DOWN price",
-        downContractPrice === null ? "--" : downContractPrice.toFixed(3),
-        "DOWN contract price at the exact moment the prediction was stored.",
-      ),
     ].join("");
     return factMarkup;
   }
 
   private renderStatusFacts(card: DashboardModelCard): string {
     const predictionConfidence = card.latestPrediction?.confidence.toFixed(2) || "--";
-    const predictionTimestamp = card.latestPrediction?.predictionMadeAt || card.latestPrediction?.marketEnd || "Open";
     const scoreValue = card.scorePercent === null ? "--" : `${card.scorePercent.toFixed(1)}%`;
-    const scoreHitsValue = card.resolvedPredictionCount === 0 ? "--" : `${((card.correctPredictionCount / card.resolvedPredictionCount) * 100).toFixed(0)}%`;
+    const hitRateValue = card.hitRatePercent === null ? "--" : `${card.hitRatePercent.toFixed(0)}%`;
     const factMarkup = [
-      this.renderFact("Score", scoreValue, "Resolved prediction accuracy for this slot."),
-      this.renderFact("Score hits", scoreHitsValue, "Correct predictions as a share of resolved predictions."),
+      this.renderFact("Score", scoreValue, "Average realized edge from resolved predictions using the actual entry price paid."),
+      this.renderFact("Hit rate", hitRateValue, "Correct predictions as a share of resolved predictions."),
       this.renderFact("Snapshots", String(card.snapshotCount), "Snapshots ingested for the current live market."),
       this.renderFact("Confidence", predictionConfidence, "Model confidence for the latest directional call."),
-      this.renderFact("Updated", predictionTimestamp, "Timestamp of the latest stored prediction event."),
       this.renderFact("Trained", String(card.modelStatus.trainedMarketCount), "Closed markets already used for model training."),
       this.renderFact("Pending closed", String(card.pendingClosedMarketCount), "Closed markets still waiting to be trained."),
-      this.renderFact("Model", card.modelStatus.modelVersion, "Loaded checkpoint version serving this slot."),
     ].join("");
     return factMarkup;
   }
@@ -129,12 +114,14 @@ export class DashboardPageService {
   }
 
   private renderCard(card: DashboardModelCard): string {
+    const latestCall = card.latestPrediction?.predictedDirection || "WAITING";
     const cardMarkup = this.renderTemplate(DASHBOARD_CARD_TEMPLATE, {
       DASHBOARD_CARD_DIRECTION_CLASS: card.currentDirection.toLowerCase(),
+      DASHBOARD_LATEST_CALL_CLASS: latestCall.toLowerCase(),
       DASHBOARD_CARD_TITLE: `${card.asset.toUpperCase()} ${card.window}`,
       DASHBOARD_CARD_STATUS: card.liveMarketSlug ? "Live" : "Idle",
       DASHBOARD_CARD_DIRECTION: card.currentDirection,
-      DASHBOARD_PREDICTION_DIRECTION: card.latestPrediction?.predictedDirection || "WAITING",
+      DASHBOARD_PREDICTION_DIRECTION: latestCall,
       DASHBOARD_PROGRESS_PERCENT: (card.progress * 100).toFixed(2),
       DASHBOARD_CARD_FACTS: this.renderCardFacts(card),
       DASHBOARD_HISTORY_KEY: `${card.asset}-${card.window}`,

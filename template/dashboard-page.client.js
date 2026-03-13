@@ -65,38 +65,32 @@ const openHistoryModal = (historyKey) => {
 
 const renderCard = (card) => {
   const directionClassName = card.currentDirection.toLowerCase();
+  const latestCallClassName = (card.latestPrediction?.predictedDirection || "WAITING").toLowerCase();
   const liveMarketStatus = card.liveMarketSlug ? "Live" : "Idle";
   const progressPercent = (card.progress * 100).toFixed(2);
   const predictionDirection = card.latestPrediction?.predictedDirection || "WAITING";
   const predictionConfidence = card.latestPrediction?.confidence.toFixed(2) || "--";
-  const predictionTimestamp = card.latestPrediction?.predictionMadeAt || card.latestPrediction?.marketEnd || "Open";
   const liveUpPrice = card.liveUpPrice === null ? "--" : card.liveUpPrice.toFixed(3);
   const liveDownPrice = card.liveDownPrice === null ? "--" : card.liveDownPrice.toFixed(3);
   const predictedContractPrice = card.latestPrediction ? (card.latestPrediction.predictedDirection === "UP" ? card.latestPrediction.upPrice : card.latestPrediction.downPrice) : null;
   const predictedContractPriceValue = predictedContractPrice === null ? "--" : predictedContractPrice.toFixed(3);
-  const upContractPrice = card.latestPrediction?.upPrice ?? null;
-  const downContractPrice = card.latestPrediction?.downPrice ?? null;
   const referencePrice = card.referencePrice === null ? "N/A" : card.referencePrice.toFixed(2);
   const targetPrice = card.priceToBeat === null ? "N/A" : card.priceToBeat.toFixed(2);
   const scoreValue = card.scorePercent === null ? "--" : card.scorePercent.toFixed(1) + "%";
-  const scoreHitsValue = card.resolvedPredictionCount === 0 ? "--" : ((card.correctPredictionCount / card.resolvedPredictionCount) * 100).toFixed(0) + "%";
+  const hitRateValue = card.hitRatePercent === null ? "--" : card.hitRatePercent.toFixed(0) + "%";
   const historyRowCount = Math.min(card.predictionHistory.filter((entry) => entry.actualDirection !== null).length, 6);
   const factMarkup = [
     renderFact("Chainlink", referencePrice, "Latest Chainlink price from the collector snapshot."),
     renderFact("Live UP", liveUpPrice, "Current UP contract price from the latest collector snapshot."),
     renderFact("Live DOWN", liveDownPrice, "Current DOWN contract price from the latest collector snapshot."),
-    renderFact("Score", scoreValue, "Resolved prediction accuracy for this slot."),
-    renderFact("Score hits", scoreHitsValue, "Correct predictions as a share of resolved predictions."),
+    renderFact("Score", scoreValue, "Average realized edge from resolved predictions using the actual entry price paid."),
+    renderFact("Hit rate", hitRateValue, "Correct predictions as a share of resolved predictions."),
     renderFact("Target", targetPrice, "Strike price the market must finish above or below."),
     renderFact("Snapshots", String(card.snapshotCount), "Snapshots ingested for the current live market."),
     renderFact("Confidence", predictionConfidence, "Model confidence for the latest directional call."),
     renderFact("Entry price", predictedContractPriceValue, "Polymarket contract price we would have bought following the predicted side."),
-    renderFact("UP price", upContractPrice === null ? "--" : upContractPrice.toFixed(3), "UP contract price at the exact moment the prediction was stored."),
-    renderFact("DOWN price", downContractPrice === null ? "--" : downContractPrice.toFixed(3), "DOWN contract price at the exact moment the prediction was stored."),
-    renderFact("Updated", predictionTimestamp, "Timestamp of the latest stored prediction event."),
     renderFact("Trained", String(card.modelStatus.trainedMarketCount), "Closed markets already used for model training."),
     renderFact("Pending closed", String(card.pendingClosedMarketCount), "Closed markets still waiting to be trained."),
-    renderFact("Model", card.modelStatus.modelVersion, "Loaded checkpoint version serving this slot."),
   ].join("");
   return (
     '<section class="card ' +
@@ -109,7 +103,9 @@ const renderCard = (card) => {
     liveMarketStatus +
     '</p></div><div class="direction-pill">' +
     card.currentDirection +
-    '</div></header><section class="status-row"><div><span class="hint-label" title="Current model direction for the live market.">Latest call</span><strong class="direction-value">' +
+    '</div></header><section class="status-row"><div class="latest-call ' +
+    latestCallClassName +
+    '"><span class="hint-label" title="Current model direction for the live market.">Latest call</span><strong class="direction-value">' +
     predictionDirection +
     '</strong></div><div class="progress-shell"><div class="progress-header"><span class="hint-label" title="Elapsed share between market start and market end.">Market progress</span><strong>' +
     progressPercent +
