@@ -66,7 +66,7 @@ export class ServiceRuntime {
     const collectorClientService = CollectorClientService.createDefault();
     const marketFeatureProjectorService = MarketFeatureProjectorService.createDefault();
     const modelRegistryService = ModelRegistryService.createDefault(marketFeatureProjectorService.getFeatureLabels().length);
-    const predictionHistoryService = PredictionHistoryService.createDefault();
+    const predictionHistoryService = PredictionHistoryService.createDefault((pair) => modelRegistryService.getPredictionContext(pair).recentReferenceDelta);
     const predictionService = PredictionService.createDefault(modelRegistryService, marketFeatureProjectorService);
     const livePredictionService = LivePredictionService.createDefault(collectorClientService, predictionService, predictionHistoryService, () =>
       new Date().toISOString(),

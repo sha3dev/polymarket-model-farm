@@ -5,7 +5,7 @@ main { width: min(1700px, calc(100vw - 24px)); margin: 0 auto; padding: 14px 0 2
 h1, h2, h3, h4, p, button { margin: 0; }
 .update-bar, .card, .history-dialog { border: 1px solid var(--line); background: var(--panel); }
 .update-bar { display: flex; justify-content: space-between; gap: 12px; align-items: center; padding: 10px 12px; border-radius: 16px; margin-bottom: 12px; }
-.eyebrow, .hint-label, th { display: block; text-transform: uppercase; letter-spacing: 0.14em; font-size: 9px; color: var(--muted); }
+.eyebrow, .hint-label { display: block; text-transform: uppercase; letter-spacing: 0.14em; font-size: 9px; color: var(--muted); }
 .update-bar p, .section-heading p, .history-caption { color: var(--muted); line-height: 1.45; }
 .update-value, .fact-value { display: block; margin-top: 3px; font-size: 12px; font-weight: 600; color: var(--text); }
 .section-heading { display: flex; justify-content: space-between; gap: 12px; align-items: end; margin: 14px 0 8px; }
@@ -23,7 +23,7 @@ h1, h2, h3, h4, p, button { margin: 0; }
 .card-header { margin-bottom: 8px; }
 .card-title h3 { font-size: 15px; letter-spacing: -0.02em; }
 .card-title p { margin-top: 2px; color: var(--muted); font-size: 10px; }
-.direction-pill { min-width: 68px; text-align: center; border-radius: 999px; padding: 6px 8px; font-size: 9px; letter-spacing: 0.15em; text-transform: uppercase; background: rgba(255,255,255,0.05); }
+.direction-pill { min-width: 68px; text-align: center; border-radius: 999px; padding: 6px 8px; font-size: 12px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; background: rgba(255,255,255,0.05); }
 .card.up .direction-pill { color: var(--up); }
 .card.down .direction-pill { color: var(--down); }
 .card.flat .direction-pill { color: var(--flat); }
@@ -51,6 +51,7 @@ h1, h2, h3, h4, p, button { margin: 0; }
 .history-dialog-header h4 { font-size: 13px; }
 .history-dialog-body { max-height: min(70vh, 520px); overflow: auto; }
 table { width: 100%; border-collapse: collapse; font-size: 10px; }
+thead th { text-transform: uppercase; letter-spacing: 0.14em; font-size: 9px; color: var(--muted); white-space: nowrap; }
 th, td { text-align: left; padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.07); }
 td { color: var(--soft); font-size: 10px; }
 .empty-cell { color: var(--muted); }

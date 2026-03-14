@@ -20,7 +20,7 @@ This service exists to turn full Polymarket market lifecycles into recurrent Ten
 
 - trains eight GRU model slots continuously from the collector history
 - keeps exchange and Polymarket order book state as sequence features
-- emits one signed confidence score per live market once progress crosses the configured threshold
+- emits staged live predictions at 50%, `LIVE_PREDICTION_PROGRESS`, and 90%, keeping the first one that clears the confidence threshold
 - stores prediction history locally so hits and misses remain visible in the dashboard
 
 ## Setup
@@ -140,9 +140,10 @@ Returns the latest one-shot live predictions already emitted for the currently a
 
 Behavior notes:
 
-- predictions are emitted once per live market when progress reaches `LIVE_PREDICTION_PROGRESS`
-- confidence is signed in `[-1, 1]`
-- positive confidence means `UP`, negative confidence means `DOWN`
+- predictions are attempted at 50%, `LIVE_PREDICTION_PROGRESS`, and 90% market progress
+- the first attempt whose confidence clears `MIN_VALID_PREDICTION_CONFIDENCE` is the one persisted for that market
+- confidence is the model-estimated probability of the chosen direction in `[0.5, 1.0]`
+- higher confidence means the model believes the selected side is more likely to win
 
 ### `GET /api/dashboard`
 
@@ -154,7 +155,7 @@ Returns a lightweight HTML dashboard for manual evaluation.
 
 ## Feature Engineering
 
-Each snapshot becomes one row with `89` features. The model sees the full ordered sequence from market open to the current snapshot.
+Each snapshot becomes one row with `91` features. The model sees the full ordered sequence from market open to the current snapshot.
 
 ### Market context features
 
@@ -188,6 +189,7 @@ These are intentionally exchange-separated. The service does not average venues 
 - `external-price-range-normalized`
 - `external-stddev-normalized`
 - `external-source-count-normalized`
+- `chainlink-vs-exchange-median`
 
 These summarize disagreement and coverage across external providers.
 
@@ -199,7 +201,8 @@ These summarize disagreement and coverage across external providers.
 - `up-mid`
 - `down-mid`
 - `up-mid-minus-down-mid`
-- `polymarket-gap-vs-external`
+- `polymarket-overround`
+- `polymarket-mid-overround`
 
 ### Polymarket order book features
 
@@ -284,7 +287,7 @@ type PredictionResponsePayload = { predictions: PredictionItem[] };
 
 Behavior notes:
 
-- `PredictionItem.confidence` is signed and bounded
+- `PredictionItem.confidence` is an unsigned probability-style score in `[0.5, 1.0]`
 - `PredictionItem.predictedDelta` is the unbounded delta estimate restored from the model output
 
 ### `DashboardPayload`
@@ -335,8 +338,10 @@ All runtime defaults live in `src/config.ts`.
 - `config.RECENT_TARGET_DELTA_LIMIT`: rolling window size for recent observed target deltas.
 - `config.MIN_TRAINED_MARKETS_FOR_PREDICTION`: minimum closed-market count required before a slot can emit live predictions.
 - `config.PREDICTION_HISTORY_LIMIT`: maximum stored live predictions per pair.
-- `config.CONFIDENCE_DELTA_FACTOR`: factor that maps predicted delta versus recent reference deltas into confidence.
-- `config.LIVE_PREDICTION_PROGRESS`: progress threshold that triggers the one-shot live prediction.
+- `config.CONFIDENCE_DELTA_FACTOR`: factor that maps predicted delta into a probability-style confidence score.
+- `config.MIN_VALID_PREDICTION_CONFIDENCE`: minimum confidence required for a live prediction to be persisted and for a resolved prediction to count toward dashboard result and hit rate.
+- `config.SHOULD_RECALCULATE_HISTORY_CONFIDENCE_ON_STARTUP`: when `true`, rewrites persisted history confidence values during startup using the current confidence formula.
+- `config.LIVE_PREDICTION_PROGRESS`: middle staged prediction threshold used between the fixed 50% and 90% attempts.
 - `config.LIVE_PREDICTION_POLL_INTERVAL_MS`: polling cadence for current live markets.
 - `config.COLLECTOR_STATE_CACHE_TTL_MS`: in-memory TTL for `/state`.
 - `config.COLLECTOR_MARKET_CACHE_TTL_MS`: in-memory TTL for `/markets`.
@@ -365,7 +370,7 @@ All runtime defaults live in `src/config.ts`.
 
 ### No models are predicting yet
 
-The prediction route only returns markets that already crossed `LIVE_PREDICTION_PROGRESS` and for which a model checkpoint exists.
+The prediction route only returns markets that already crossed the first staged threshold at 50% progress and for which a model checkpoint exists.
 
 ### The trainer appears idle
 

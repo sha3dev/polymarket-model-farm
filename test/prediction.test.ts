@@ -1,6 +1,12 @@
 import * as assert from "node:assert/strict";
+import * as fs from "node:fs/promises";
+import * as os from "node:os";
+import * as path from "node:path";
 import { test } from "node:test";
 
+import config from "../src/config.ts";
+import { PredictionHistoryService } from "../src/history/index.ts";
+import type { PredictionHistoryEntry } from "../src/history/index.ts";
 import { ModelRegistryService } from "../src/model/index.ts";
 import type { PredictionMarketInput } from "../src/prediction/index.ts";
 import { LivePredictionService, PredictionService } from "../src/prediction/index.ts";
@@ -20,7 +26,7 @@ test("PredictionService converts model delta into directional confidence", async
   assert.equal(prediction.predictedDirection, "UP");
   assert.equal(prediction.snapshotCount, 2);
   assert.ok(prediction.predictedDelta > 0);
-  assert.ok(prediction.confidence > 0);
+  assert.ok(prediction.confidence >= 0.5);
   assert.ok(prediction.confidence <= 1);
   assert.equal(prediction.modelVersion, "model-v1");
 });
@@ -197,6 +203,66 @@ test("LivePredictionService resolves closed predictions from final up/down price
   await livePredictionService.refreshOnce();
 
   assert.deepEqual(resolvedPredictions, [{ slug: "btc-updown-5m-1773425100", actualDelta: 0.52 }]);
+});
+
+test("LivePredictionService records the first threshold that clears confidence", async () => {
+  const recordedPredictions: Array<Pick<PredictionHistoryEntry, "progressWhenPredicted" | "upPrice" | "downPrice" | "confidence">> = [];
+  const livePredictionService = new LivePredictionService({
+    collectorClientService: { loadState: async () => buildLivePredictionStatePayload(), loadMarketSnapshots: async () => buildLivePredictionMarketPayload() } as unknown as ConstructorParameters<
+      typeof LivePredictionService
+    >[0]["collectorClientService"],
+    predictionService: {
+      buildPrediction: async (market: PredictionMarketInput) => {
+        const latestSnapshot = market.snapshots[market.snapshots.length - 1];
+        if (latestSnapshot?.generatedAt === Date.parse("2026-03-13T18:07:30.000Z")) {
+          return {
+            slug: market.slug,
+            asset: market.asset,
+            window: market.window,
+            snapshotCount: market.snapshots.length,
+            progress: 0.5,
+            confidence: 0.55,
+            predictedDelta: 0.01,
+            predictedDirection: "UP",
+            observedPrice: 71010,
+            modelVersion: "model-v1",
+            trainedMarketCount: 200,
+            generatedAt: "2026-03-13T18:07:30.000Z",
+          };
+        }
+        return {
+          slug: market.slug,
+          asset: market.asset,
+          window: market.window,
+          snapshotCount: market.snapshots.length,
+          progress: 0.75,
+          confidence: 0.82,
+          predictedDelta: -0.01,
+          predictedDirection: "DOWN",
+          observedPrice: 70990,
+          modelVersion: "model-v1",
+          trainedMarketCount: 200,
+          generatedAt: "2026-03-13T18:08:45.000Z",
+        };
+      },
+    } as unknown as ConstructorParameters<typeof LivePredictionService>[0]["predictionService"],
+    predictionHistoryService: {
+      getLatestPrediction: async () => null,
+      recordPrediction: async (
+        _pair: { asset: string; window: string },
+        entry: PredictionHistoryEntry,
+      ) => {
+        recordedPredictions.push({ progressWhenPredicted: entry.progressWhenPredicted, upPrice: entry.upPrice, downPrice: entry.downPrice, confidence: entry.confidence });
+      },
+      loadHistory: async () => ({ entries: [] }),
+      resolvePrediction: async () => {},
+    } as unknown as ConstructorParameters<typeof LivePredictionService>[0]["predictionHistoryService"],
+    now: () => "2026-03-13T18:09:31.000Z",
+  });
+
+  await livePredictionService.refreshOnce();
+
+  assert.deepEqual(recordedPredictions, [{ progressWhenPredicted: 0.75, upPrice: 0.27, downPrice: 0.73, confidence: 0.82 }]);
 });
 
 test("LivePredictionService initializes unresolved history only once across refresh cycles", async () => {
@@ -396,6 +462,92 @@ test("LivePredictionService backs off collector retries for unresolved closed ma
   assert.equal(loadMarketSnapshotsCallCount, 2);
 });
 
+test("PredictionHistoryService recalculates stored confidence values during initialization", async () => {
+  const storageDirectoryPath = await fs.mkdtemp(path.join(os.tmpdir(), "prediction-history-test-"));
+  const predictionHistoryService = new PredictionHistoryService({ storageDirectoryPath, referenceDeltaReader: () => 0.04 });
+  await fs.writeFile(
+    path.join(storageDirectoryPath, "btc-5m.json"),
+    JSON.stringify({
+      entries: [
+        {
+          slug: "btc-updown-5m-1773425100",
+          asset: "btc",
+          window: "5m",
+          marketStart: "2026-03-13T18:05:00.000Z",
+          marketEnd: "2026-03-13T18:10:00.000Z",
+          predictionMadeAt: "2026-03-13T18:08:51.626Z",
+          progressWhenPredicted: 0.76,
+          observedPrice: 71038.28,
+          upPrice: 0.3,
+          downPrice: 0.71,
+          predictedDelta: 0.02,
+          confidence: 0.01,
+          predictedDirection: "UP",
+          modelVersion: "btc-5m-2026-03-13T18:07:48.948Z",
+          actualDelta: null,
+          actualDirection: null,
+          isCorrect: null,
+        },
+      ],
+    }),
+    "utf8",
+  );
+
+  await predictionHistoryService.initialize();
+
+  const history = await predictionHistoryService.loadHistory({ asset: "btc", window: "5m" });
+  const expectedConfidence = 1 / (1 + Math.exp(-(0.02 / (0.04 * config.CONFIDENCE_DELTA_FACTOR))));
+
+  assert.equal(history.entries.length, 1);
+  assert.equal(history.entries[0]?.confidence, expectedConfidence);
+});
+
+test("PredictionHistoryService can skip stored confidence recalculation on startup", async () => {
+  const storageDirectoryPath = await fs.mkdtemp(path.join(os.tmpdir(), "prediction-history-test-"));
+  const previousToggle = config.SHOULD_RECALCULATE_HISTORY_CONFIDENCE_ON_STARTUP;
+  const predictionHistoryService = new PredictionHistoryService({ storageDirectoryPath, referenceDeltaReader: () => 0.04 });
+  await fs.writeFile(
+    path.join(storageDirectoryPath, "btc-5m.json"),
+    JSON.stringify({
+      entries: [
+        {
+          slug: "btc-updown-5m-1773425100",
+          asset: "btc",
+          window: "5m",
+          marketStart: "2026-03-13T18:05:00.000Z",
+          marketEnd: "2026-03-13T18:10:00.000Z",
+          predictionMadeAt: "2026-03-13T18:08:51.626Z",
+          progressWhenPredicted: 0.76,
+          observedPrice: 71038.28,
+          upPrice: 0.3,
+          downPrice: 0.71,
+          predictedDelta: 0.02,
+          confidence: 0.01,
+          predictedDirection: "UP",
+          modelVersion: "btc-5m-2026-03-13T18:07:48.948Z",
+          actualDelta: null,
+          actualDirection: null,
+          isCorrect: null,
+        },
+      ],
+    }),
+    "utf8",
+  );
+
+  (config as { SHOULD_RECALCULATE_HISTORY_CONFIDENCE_ON_STARTUP: boolean }).SHOULD_RECALCULATE_HISTORY_CONFIDENCE_ON_STARTUP = false;
+
+  try {
+    await predictionHistoryService.initialize();
+  } finally {
+    (config as { SHOULD_RECALCULATE_HISTORY_CONFIDENCE_ON_STARTUP: boolean }).SHOULD_RECALCULATE_HISTORY_CONFIDENCE_ON_STARTUP = previousToggle;
+  }
+
+  const history = await predictionHistoryService.loadHistory({ asset: "btc", window: "5m" });
+
+  assert.equal(history.entries.length, 1);
+  assert.equal(history.entries[0]?.confidence, 0.01);
+});
+
 function buildMarketInput(): PredictionMarketInput {
   return {
     asset: "btc",
@@ -410,6 +562,67 @@ function buildMarketInput(): PredictionMarketInput {
       buildPredictionSnapshot("2026-03-13T00:04:00.000Z", 0.59, 0.41, 100.82, 100.8, 100.75, 100.78, 100.76),
     ],
   };
+}
+
+function buildLivePredictionSnapshot(generatedAtIso: string, upPrice: number, downPrice: number): PredictionMarketInput["snapshots"][number] {
+  const livePredictionSnapshot = { ...buildBaseLivePredictionSnapshot(generatedAtIso), upPrice, downPrice };
+  return livePredictionSnapshot;
+}
+
+function buildBaseLivePredictionSnapshot(generatedAtIso: string): PredictionMarketInput["snapshots"][number] {
+  const livePredictionSnapshot: PredictionMarketInput["snapshots"][number] = {
+    asset: "btc", window: "5m", generatedAt: Date.parse(generatedAtIso),
+    marketId: null, marketSlug: "btc-updown-5m-1773425100", marketConditionId: null,
+    marketStart: "2026-03-13T18:05:00.000Z", marketEnd: "2026-03-13T18:10:00.000Z", priceToBeat: 71000,
+    upAssetId: null, upPrice: null, upOrderBook: null, upEventTs: null,
+    downAssetId: null, downPrice: null, downOrderBook: null, downEventTs: null,
+    binancePrice: null, binanceOrderBook: null, binanceEventTs: null,
+    coinbasePrice: null, coinbaseOrderBook: null, coinbaseEventTs: null,
+    krakenPrice: null, krakenOrderBook: null, krakenEventTs: null,
+    okxPrice: null, okxOrderBook: null, okxEventTs: null,
+    chainlinkPrice: null, chainlinkOrderBook: null, chainlinkEventTs: null,
+  };
+  return livePredictionSnapshot;
+}
+
+function buildLivePredictionStatePayload(): Awaited<ReturnType<ConstructorParameters<typeof LivePredictionService>[0]["collectorClientService"]["loadState"]>> {
+  const statePayload: Awaited<ReturnType<ConstructorParameters<typeof LivePredictionService>[0]["collectorClientService"]["loadState"]>> = {
+    generatedAt: "2026-03-13T18:09:31.000Z",
+    markets: [
+      {
+        asset: "btc",
+        window: "5m",
+        market: {
+          slug: "btc-updown-5m-1773425100",
+          asset: "btc",
+          window: "5m",
+          priceToBeat: 71000,
+          prevPriceToBeat: [70950],
+          marketStart: "2026-03-13T18:05:00.000Z",
+          marketEnd: "2026-03-13T18:10:00.000Z",
+        },
+        snapshotCount: 3,
+        latestSnapshot: { ...buildLivePredictionSnapshot("2026-03-13T18:09:30.000Z", 0.12, 0.88), chainlinkPrice: 70980 },
+      },
+    ],
+  };
+  return statePayload;
+}
+
+function buildLivePredictionMarketPayload(): Awaited<ReturnType<ConstructorParameters<typeof LivePredictionService>[0]["collectorClientService"]["loadMarketSnapshots"]>> {
+  const marketPayload: Awaited<ReturnType<ConstructorParameters<typeof LivePredictionService>[0]["collectorClientService"]["loadMarketSnapshots"]>> = {
+    slug: "btc-updown-5m-1773425100",
+    asset: "btc",
+    window: "5m",
+    marketStart: "2026-03-13T18:05:00.000Z",
+    marketEnd: "2026-03-13T18:10:00.000Z",
+    snapshots: [
+      buildLivePredictionSnapshot("2026-03-13T18:07:30.000Z", 0.41, 0.59),
+      buildLivePredictionSnapshot("2026-03-13T18:08:45.000Z", 0.27, 0.73),
+      buildLivePredictionSnapshot("2026-03-13T18:09:30.000Z", 0.12, 0.88),
+    ],
+  };
+  return marketPayload;
 }
 
 function buildPredictionSnapshot(

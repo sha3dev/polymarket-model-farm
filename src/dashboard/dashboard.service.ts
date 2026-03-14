@@ -96,19 +96,19 @@ export class DashboardService {
     resolvedPredictionCount: number;
     correctPredictionCount: number;
     hitRatePercent: number | null;
-    scorePercent: number | null;
+    resultUsd: number | null;
   } {
-    const resolvedEntries = predictionHistory.filter((entry) => entry.actualDirection !== null);
+    const resolvedEntries = predictionHistory.filter((entry) => entry.actualDirection !== null && entry.confidence >= config.MIN_VALID_PREDICTION_CONFIDENCE);
     const resolvedPredictionCount = resolvedEntries.length;
     const correctPredictionCount = resolvedEntries.filter((entry) => entry.isCorrect === true).length;
-    const realizedEdge = resolvedEntries.reduce((sum, entry) => {
+    const realizedUsd = resolvedEntries.reduce((sum, entry) => {
       const entryPrice = entry.predictedDirection === "UP" ? entry.upPrice : entry.downPrice;
-      const tradeScore = entryPrice === null ? 0 : entry.isCorrect === true ? 1 - entryPrice : -entryPrice;
-      return sum + tradeScore;
+      const tradeResultUsd = entryPrice === null ? 0 : (entry.isCorrect === true ? 1 - entryPrice : -entryPrice) * 5;
+      return sum + tradeResultUsd;
     }, 0);
     const hitRatePercent = resolvedPredictionCount === 0 ? null : (correctPredictionCount / resolvedPredictionCount) * 100;
-    const scorePercent = resolvedPredictionCount === 0 ? null : (realizedEdge / resolvedPredictionCount) * 100;
-    return { resolvedPredictionCount, correctPredictionCount, hitRatePercent, scorePercent };
+    const resultUsd = resolvedPredictionCount === 0 ? null : realizedUsd;
+    return { resolvedPredictionCount, correctPredictionCount, hitRatePercent, resultUsd };
   }
 
   private async buildCard(
@@ -135,7 +135,7 @@ export class DashboardService {
       resolvedPredictionCount: score.resolvedPredictionCount,
       correctPredictionCount: score.correctPredictionCount,
       hitRatePercent: score.hitRatePercent,
-      scorePercent: score.scorePercent,
+      resultUsd: score.resultUsd,
       modelStatus,
       latestPrediction,
       predictionHistory,

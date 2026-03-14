@@ -18,7 +18,10 @@ import type { PredictionHistory, PredictionHistoryEntry } from "./index.ts";
  * @section types
  */
 
-type PredictionHistoryServiceOptions = { storageDirectoryPath: string };
+type PredictionHistoryServiceOptions = {
+  storageDirectoryPath: string;
+  referenceDeltaReader: (pair: AssetWindow) => number;
+};
 
 /**
  * @section public:properties
@@ -26,6 +29,8 @@ type PredictionHistoryServiceOptions = { storageDirectoryPath: string };
 
 export class PredictionHistoryService {
   private readonly storageDirectoryPath: string;
+
+  private readonly referenceDeltaReader: (pair: AssetWindow) => number;
 
   private readonly cache: Map<string, PredictionHistory>;
 
@@ -35,6 +40,7 @@ export class PredictionHistoryService {
 
   public constructor(options: PredictionHistoryServiceOptions) {
     this.storageDirectoryPath = options.storageDirectoryPath;
+    this.referenceDeltaReader = options.referenceDeltaReader;
     this.cache = new Map();
   }
 
@@ -42,8 +48,8 @@ export class PredictionHistoryService {
    * @section factory
    */
 
-  public static createDefault(): PredictionHistoryService {
-    return new PredictionHistoryService({ storageDirectoryPath: config.HISTORY_STORAGE_DIR });
+  public static createDefault(referenceDeltaReader?: (pair: AssetWindow) => number): PredictionHistoryService {
+    return new PredictionHistoryService({ storageDirectoryPath: config.HISTORY_STORAGE_DIR, referenceDeltaReader: referenceDeltaReader || (() => 0) });
   }
 
   /**
@@ -72,12 +78,48 @@ export class PredictionHistoryService {
     return normalizedEntry;
   }
 
+  private readRecalculatedConfidence(pair: AssetWindow, predictedDelta: number): number {
+    const confidenceReferenceDelta = Math.max(this.referenceDeltaReader(pair), config.DELTA_TARGET_SCALE, 1e-9);
+    const confidenceLogit = predictedDelta / (confidenceReferenceDelta * config.CONFIDENCE_DELTA_FACTOR);
+    const upProbability = 1 / (1 + Math.exp(-confidenceLogit));
+    const recalculatedConfidence = predictedDelta >= 0 ? upProbability : 1 - upProbability;
+    return recalculatedConfidence;
+  }
+
+  private async refreshStoredHistoryConfidence(fileName: string): Promise<void> {
+    const filePath = path.resolve(this.storageDirectoryPath, fileName);
+    const history = JSON.parse(await fs.readFile(filePath, "utf8")) as PredictionHistory;
+    const nextEntries = history.entries.map((entry) => {
+      const normalizedEntry = this.normalizeEntry(entry);
+      const recalculatedConfidence = this.readRecalculatedConfidence(
+        { asset: normalizedEntry.asset, window: normalizedEntry.window },
+        normalizedEntry.predictedDelta,
+      );
+      return { ...normalizedEntry, confidence: recalculatedConfidence };
+    });
+    const nextHistory = { entries: nextEntries };
+    this.cache.set(fileName.replace(/\.json$/, ""), nextHistory);
+    await fs.writeFile(filePath, JSON.stringify(nextHistory, null, 2), "utf8");
+  }
+
+  private async refreshStoredConfidenceValues(): Promise<void> {
+    const fileNames = await fs.readdir(this.storageDirectoryPath);
+    for (const fileName of fileNames) {
+      if (fileName.endsWith(".json")) {
+        await this.refreshStoredHistoryConfidence(fileName);
+      }
+    }
+  }
+
   /**
    * @section public:methods
    */
 
   public async initialize(): Promise<void> {
     await fs.mkdir(this.storageDirectoryPath, { recursive: true });
+    if (config.SHOULD_RECALCULATE_HISTORY_CONFIDENCE_ON_STARTUP) {
+      await this.refreshStoredConfidenceValues();
+    }
   }
 
   public async loadHistory(pair: AssetWindow): Promise<PredictionHistory> {

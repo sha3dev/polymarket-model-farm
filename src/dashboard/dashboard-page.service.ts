@@ -35,12 +35,6 @@ type DashboardTemplateValues = Record<string, string>;
 
 export class DashboardPageService {
   /**
-   * @section constructor
-   */
-
-  public constructor() {}
-
-  /**
    * @section private:methods
    */
 
@@ -90,10 +84,10 @@ export class DashboardPageService {
 
   private renderStatusFacts(card: DashboardModelCard): string {
     const predictionConfidence = card.latestPrediction?.confidence.toFixed(2) || "--";
-    const scoreValue = card.scorePercent === null ? "--" : `${card.scorePercent.toFixed(1)}%`;
+    const resultValue = card.resultUsd === null ? "--" : `${card.resultUsd >= 0 ? "+" : "-"}$${Math.abs(card.resultUsd).toFixed(2)}`;
     const hitRateValue = card.hitRatePercent === null ? "--" : `${card.hitRatePercent.toFixed(0)}%`;
     const factMarkup = [
-      this.renderFact("Score", scoreValue, "Average realized edge from resolved predictions using the actual entry price paid."),
+      this.renderFact("Result", resultValue, "Total USD result from buying 5 shares on each valid resolved prediction at the entry price."),
       this.renderFact("Hit rate", hitRateValue, "Correct predictions as a share of resolved predictions."),
       this.renderFact("Snapshots", String(card.snapshotCount), "Snapshots ingested for the current live market."),
       this.renderFact("Confidence", predictionConfidence, "Model confidence for the latest directional call."),

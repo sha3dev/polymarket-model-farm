@@ -85,9 +85,10 @@ export class PredictionService {
   private computeConfidence(market: PredictionMarketInput, predictedDelta: number): number {
     const predictionContext = this.modelRegistryService.getPredictionContext({ asset: market.asset, window: market.window });
     const fallbackReferenceDelta = this.readPrevBeatMeanDelta(market);
-    const referenceDelta = Math.max(predictionContext.recentReferenceDelta, fallbackReferenceDelta);
-    const confidenceMagnitude = referenceDelta === 0 ? 0 : this.clamp(Math.abs(predictedDelta) / (referenceDelta * config.CONFIDENCE_DELTA_FACTOR), 0, 1);
-    const confidence = Math.sign(predictedDelta) * confidenceMagnitude;
+    const confidenceReferenceDelta = Math.max(predictionContext.recentReferenceDelta, fallbackReferenceDelta, config.DELTA_TARGET_SCALE, 1e-9);
+    const confidenceLogit = predictedDelta / (confidenceReferenceDelta * config.CONFIDENCE_DELTA_FACTOR);
+    const upProbability = 1 / (1 + Math.exp(-confidenceLogit));
+    const confidence = predictedDelta >= 0 ? upProbability : 1 - upProbability;
     return confidence;
   }
 

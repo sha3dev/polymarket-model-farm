@@ -76,14 +76,14 @@ const renderCard = (card) => {
   const predictedContractPriceValue = predictedContractPrice === null ? "--" : predictedContractPrice.toFixed(3);
   const referencePrice = card.referencePrice === null ? "N/A" : card.referencePrice.toFixed(2);
   const targetPrice = card.priceToBeat === null ? "N/A" : card.priceToBeat.toFixed(2);
-  const scoreValue = card.scorePercent === null ? "--" : card.scorePercent.toFixed(1) + "%";
+  const resultValue = card.resultUsd === null ? "--" : (card.resultUsd >= 0 ? "+$" : "-$") + Math.abs(card.resultUsd).toFixed(2);
   const hitRateValue = card.hitRatePercent === null ? "--" : card.hitRatePercent.toFixed(0) + "%";
   const historyRowCount = Math.min(card.predictionHistory.filter((entry) => entry.actualDirection !== null).length, 6);
   const factMarkup = [
     renderFact("Chainlink", referencePrice, "Latest Chainlink price from the collector snapshot."),
     renderFact("Live UP", liveUpPrice, "Current UP contract price from the latest collector snapshot."),
     renderFact("Live DOWN", liveDownPrice, "Current DOWN contract price from the latest collector snapshot."),
-    renderFact("Score", scoreValue, "Average realized edge from resolved predictions using the actual entry price paid."),
+    renderFact("Result", resultValue, "Total USD result from buying 5 shares on each valid resolved prediction at the entry price."),
     renderFact("Hit rate", hitRateValue, "Correct predictions as a share of resolved predictions."),
     renderFact("Target", targetPrice, "Strike price the market must finish above or below."),
     renderFact("Snapshots", String(card.snapshotCount), "Snapshots ingested for the current live market."),

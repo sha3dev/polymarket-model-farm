@@ -25,7 +25,7 @@ export type DashboardModelCard = {
   resolvedPredictionCount: number;
   correctPredictionCount: number;
   hitRatePercent: number | null;
-  scorePercent: number | null;
+  resultUsd: number | null;
   modelStatus: ModelSlotStatus;
   latestPrediction: PredictionHistoryEntry | null;
   predictionHistory: PredictionHistoryEntry[];
