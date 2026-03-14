@@ -11,6 +11,10 @@ import { ModelRegistryService } from "../src/model/index.ts";
 import type { PredictionMarketInput } from "../src/prediction/index.ts";
 import { LivePredictionService, PredictionService } from "../src/prediction/index.ts";
 
+test("config defaults the market confidence weight to two", () => {
+  assert.equal(config.CONFIDENCE_MARKET_WEIGHT, 2);
+});
+
 test("PredictionService converts model delta into directional confidence", async () => {
   const predictionService = new PredictionService({
     modelRegistryService: {
@@ -495,6 +499,7 @@ test("LivePredictionService backs off collector retries for unresolved closed ma
 
 test("PredictionHistoryService recalculates stored confidence values during initialization", async () => {
   const storageDirectoryPath = await fs.mkdtemp(path.join(os.tmpdir(), "prediction-history-test-"));
+  const previousToggle = config.SHOULD_RECALCULATE_HISTORY_CONFIDENCE_ON_STARTUP;
   const predictionHistoryService = new PredictionHistoryService({ storageDirectoryPath, referenceDeltaReader: () => 0.04 });
   await fs.writeFile(
     path.join(storageDirectoryPath, "btc-5m.json"),
@@ -524,7 +529,13 @@ test("PredictionHistoryService recalculates stored confidence values during init
     "utf8",
   );
 
-  await predictionHistoryService.initialize();
+  (config as { SHOULD_RECALCULATE_HISTORY_CONFIDENCE_ON_STARTUP: boolean }).SHOULD_RECALCULATE_HISTORY_CONFIDENCE_ON_STARTUP = true;
+
+  try {
+    await predictionHistoryService.initialize();
+  } finally {
+    (config as { SHOULD_RECALCULATE_HISTORY_CONFIDENCE_ON_STARTUP: boolean }).SHOULD_RECALCULATE_HISTORY_CONFIDENCE_ON_STARTUP = previousToggle;
+  }
 
   const history = await predictionHistoryService.loadHistory({ asset: "btc", window: "5m" });
   const modelLogit = 0.02 / (0.04 * config.CONFIDENCE_DELTA_FACTOR);
@@ -539,6 +550,7 @@ test("PredictionHistoryService recalculates stored confidence values during init
 
 test("PredictionHistoryService keeps recalculated confidence expressive for small reference deltas", async () => {
   const storageDirectoryPath = await fs.mkdtemp(path.join(os.tmpdir(), "prediction-history-test-"));
+  const previousToggle = config.SHOULD_RECALCULATE_HISTORY_CONFIDENCE_ON_STARTUP;
   const predictionHistoryService = new PredictionHistoryService({ storageDirectoryPath, referenceDeltaReader: () => 0.0005 });
   await fs.writeFile(
     path.join(storageDirectoryPath, "btc-5m.json"),
@@ -568,7 +580,13 @@ test("PredictionHistoryService keeps recalculated confidence expressive for smal
     "utf8",
   );
 
-  await predictionHistoryService.initialize();
+  (config as { SHOULD_RECALCULATE_HISTORY_CONFIDENCE_ON_STARTUP: boolean }).SHOULD_RECALCULATE_HISTORY_CONFIDENCE_ON_STARTUP = true;
+
+  try {
+    await predictionHistoryService.initialize();
+  } finally {
+    (config as { SHOULD_RECALCULATE_HISTORY_CONFIDENCE_ON_STARTUP: boolean }).SHOULD_RECALCULATE_HISTORY_CONFIDENCE_ON_STARTUP = previousToggle;
+  }
 
   const history = await predictionHistoryService.loadHistory({ asset: "btc", window: "5m" });
 
