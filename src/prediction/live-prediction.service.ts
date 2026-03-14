@@ -147,6 +147,19 @@ export class LivePredictionService {
     });
   }
 
+  private readMarketSideProbability(snapshot: Snapshot, predictedDirection: PredictionItem["predictedDirection"]): number | null {
+    const marketSideProbability = predictedDirection === "UP" ? snapshot.upPrice : snapshot.downPrice;
+    return marketSideProbability;
+  }
+
+  private shouldAcceptPrediction(prediction: PredictionItem, predictionSnapshot: Snapshot): boolean {
+    const marketSideProbability = this.readMarketSideProbability(predictionSnapshot, prediction.predictedDirection);
+    const hasAcceptableDisagreement =
+      marketSideProbability === null || Math.abs(prediction.modelConfidence - marketSideProbability) <= config.MAX_MODEL_MARKET_DISAGREEMENT;
+    const shouldAcceptPrediction = prediction.confidence >= config.MIN_VALID_PREDICTION_CONFIDENCE && hasAcceptableDisagreement;
+    return shouldAcceptPrediction;
+  }
+
   private async readThresholdPredictionAttempt(pair: AssetWindow, marketState: CollectorStateMarket, marketPayload: MarketSnapshotPayload): Promise<ThresholdPredictionAttempt | null> {
     const market = marketState.market;
     let thresholdPredictionAttempt: ThresholdPredictionAttempt | null = null;
@@ -161,7 +174,7 @@ export class LivePredictionService {
         if (predictionSnapshot) {
           const prediction = await this.buildThresholdPrediction(market, thresholdSnapshots);
           this.attemptedPredictionThresholdMap.set(pairSlugKey, predictionThreshold);
-          if (prediction.confidence >= config.MIN_VALID_PREDICTION_CONFIDENCE) {
+          if (this.shouldAcceptPrediction(prediction, predictionSnapshot)) {
             thresholdPredictionAttempt = { item: prediction, snapshot: predictionSnapshot };
             break;
           }
@@ -270,6 +283,7 @@ export class LivePredictionService {
           window: historyEntry.window,
           snapshotCount: marketState.snapshotCount,
           progress: historyEntry.progressWhenPredicted,
+          modelConfidence: historyEntry.confidence,
           confidence: historyEntry.confidence,
           predictedDelta: historyEntry.predictedDelta,
           predictedDirection: historyEntry.predictedDirection,

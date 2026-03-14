@@ -11,8 +11,10 @@ import { ModelRegistryService } from "../src/model/index.ts";
 import type { PredictionMarketInput } from "../src/prediction/index.ts";
 import { LivePredictionService, PredictionService } from "../src/prediction/index.ts";
 
-test("config defaults the market confidence weight to two", () => {
-  assert.equal(config.CONFIDENCE_MARKET_WEIGHT, 2);
+test("config defaults the confidence weights and disagreement guard", () => {
+  assert.equal(config.CONFIDENCE_MODEL_WEIGHT, 1);
+  assert.equal(config.CONFIDENCE_MARKET_WEIGHT, 1);
+  assert.equal(config.MAX_MODEL_MARKET_DISAGREEMENT, 0.25);
 });
 
 test("PredictionService converts model delta into directional confidence", async () => {
@@ -30,6 +32,8 @@ test("PredictionService converts model delta into directional confidence", async
   assert.equal(prediction.predictedDirection, "UP");
   assert.equal(prediction.snapshotCount, 2);
   assert.ok(prediction.predictedDelta > 0);
+  assert.ok(prediction.modelConfidence >= 0);
+  assert.ok(prediction.modelConfidence <= 1);
   assert.ok(prediction.confidence >= 0);
   assert.ok(prediction.confidence <= 1);
   assert.equal(prediction.modelVersion, "model-v1");
@@ -63,7 +67,7 @@ test("PredictionService tempers model confidence when the market strongly prices
   const prediction = await predictionService.buildPrediction(buildMarketInput({ upPrice: 0.1, downPrice: 0.9 }));
 
   assert.equal(prediction.predictedDirection, "UP");
-  assert.ok(prediction.confidence < 0.5);
+  assert.ok(prediction.confidence < prediction.modelConfidence);
 });
 
 test("PredictionService rejects markets without historical price-to-beat", async () => {
@@ -256,6 +260,7 @@ test("LivePredictionService records the first threshold that clears confidence",
             window: market.window,
             snapshotCount: market.snapshots.length,
             progress: 0.5,
+            modelConfidence: 0.55,
             confidence: 0.55,
             predictedDelta: 0.01,
             predictedDirection: "UP",
@@ -271,6 +276,7 @@ test("LivePredictionService records the first threshold that clears confidence",
           window: market.window,
           snapshotCount: market.snapshots.length,
           progress: 0.75,
+          modelConfidence: 0.82,
           confidence: 0.82,
           predictedDelta: -0.01,
           predictedDirection: "DOWN",
@@ -298,6 +304,67 @@ test("LivePredictionService records the first threshold that clears confidence",
   await livePredictionService.refreshOnce();
 
   assert.deepEqual(recordedPredictions, [{ progressWhenPredicted: 0.75, upPrice: 0.27, downPrice: 0.73, confidence: 0.82 }]);
+});
+
+test("LivePredictionService rejects a prediction when model-market disagreement is too large", async () => {
+  const recordedPredictions: PredictionHistoryEntry[] = [];
+  const livePredictionService = new LivePredictionService({
+    collectorClientService: { loadState: async () => buildLivePredictionStatePayload(), loadMarketSnapshots: async () => buildLivePredictionMarketPayload() } as unknown as ConstructorParameters<
+      typeof LivePredictionService
+    >[0]["collectorClientService"],
+    predictionService: {
+      buildPrediction: async (market: PredictionMarketInput) => {
+        const latestSnapshot = market.snapshots[market.snapshots.length - 1];
+        if (latestSnapshot?.generatedAt === Date.parse("2026-03-13T18:07:30.000Z")) {
+          return {
+            slug: market.slug,
+            asset: market.asset,
+            window: market.window,
+            snapshotCount: market.snapshots.length,
+            progress: 0.5,
+            modelConfidence: 0.95,
+            confidence: 0.82,
+            predictedDelta: 0.01,
+            predictedDirection: "UP",
+            observedPrice: 71010,
+            modelVersion: "model-v1",
+            trainedMarketCount: 200,
+            generatedAt: "2026-03-13T18:07:30.000Z",
+          };
+        }
+        return {
+          slug: market.slug,
+          asset: market.asset,
+          window: market.window,
+          snapshotCount: market.snapshots.length,
+          progress: 0.75,
+          modelConfidence: 0.82,
+          confidence: 0.82,
+          predictedDelta: -0.01,
+          predictedDirection: "DOWN",
+          observedPrice: 70990,
+          modelVersion: "model-v1",
+          trainedMarketCount: 200,
+          generatedAt: "2026-03-13T18:08:45.000Z",
+        };
+      },
+    } as unknown as ConstructorParameters<typeof LivePredictionService>[0]["predictionService"],
+    predictionHistoryService: {
+      getLatestPrediction: async () => null,
+      recordPrediction: async (_pair: { asset: string; window: string }, entry: PredictionHistoryEntry) => {
+        recordedPredictions.push(entry);
+      },
+      loadHistory: async () => ({ entries: [] }),
+      resolvePrediction: async () => {},
+    } as unknown as ConstructorParameters<typeof LivePredictionService>[0]["predictionHistoryService"],
+    now: () => "2026-03-13T18:09:31.000Z",
+  });
+
+  await livePredictionService.refreshOnce();
+
+  assert.equal(recordedPredictions.length, 1);
+  assert.equal(recordedPredictions[0]?.predictedDirection, "DOWN");
+  assert.equal(recordedPredictions[0]?.progressWhenPredicted, 0.75);
 });
 
 test("LivePredictionService initializes unresolved history only once across refresh cycles", async () => {

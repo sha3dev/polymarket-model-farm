@@ -172,12 +172,16 @@ export class PredictionService {
     const boundedPrediction = await this.modelRegistryService.predict({ asset: market.asset, window: market.window }, featureProjection.rows);
     const predictedDelta = Math.atanh(this.clamp(boundedPrediction, -0.999999, 0.999999)) * config.DELTA_TARGET_SCALE;
     const predictionContext = this.modelRegistryService.getPredictionContext({ asset: market.asset, window: market.window });
+    const confidenceReferenceDelta = this.readConfidenceReferenceDelta(market);
+    const modelUpProbability = this.readModelUpProbability(predictedDelta, confidenceReferenceDelta);
+    const modelConfidence = predictedDelta >= 0 ? modelUpProbability : 1 - modelUpProbability;
     return {
       slug: market.slug,
       asset: market.asset,
       window: market.window,
       snapshotCount: market.snapshots.length,
       progress: this.readProgress(market),
+      modelConfidence,
       confidence: this.computeConfidence(market, predictedDelta),
       predictedDelta,
       predictedDirection: predictedDelta >= 0 ? "UP" : "DOWN",

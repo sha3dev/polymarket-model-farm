@@ -141,7 +141,7 @@ Returns the latest one-shot live predictions already emitted for the currently a
 Behavior notes:
 
 - predictions are attempted at each configured progress step from `LIVE_PREDICTION_PROGRESS_STEPS`
-- the first attempt whose confidence clears `MIN_VALID_PREDICTION_CONFIDENCE` is the one persisted for that market
+- the first attempt whose confidence clears `MIN_VALID_PREDICTION_CONFIDENCE` and whose raw model-vs-market disagreement stays within `MAX_MODEL_MARKET_DISAGREEMENT` is the one persisted for that market
 - confidence is a blended probability in `[0, 1]` that combines the model view with the live market price when `UP/DOWN` prices exist
 - higher confidence means the final blended view is more favorable to the chosen side
 - confidence is calculated in six steps:
@@ -368,6 +368,7 @@ All runtime defaults live in `src/config.ts`.
   Lower values make confidence more aggressive; higher values compress it closer to `0.5`.
 - `config.CONFIDENCE_MODEL_WEIGHT`: weight of the model log-odds inside the blended confidence calculation.
 - `config.CONFIDENCE_MARKET_WEIGHT`: weight of the market-implied log-odds inside the blended confidence calculation.
+- `config.MAX_MODEL_MARKET_DISAGREEMENT`: maximum allowed absolute gap between raw model confidence and market-implied probability for the chosen side before a live prediction is rejected.
 - `config.MIN_VALID_PREDICTION_CONFIDENCE`: minimum confidence required for a live prediction to be persisted and for a resolved prediction to count toward dashboard result and hit rate.
 - `config.SHOULD_RECALCULATE_HISTORY_CONFIDENCE_ON_STARTUP`: when `true`, rewrites persisted history confidence values during startup using the current confidence formula.
 - `config.LIVE_PREDICTION_PROGRESS_STEPS`: ordered list of staged live-prediction thresholds between `0` and `1`.

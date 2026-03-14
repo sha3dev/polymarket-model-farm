@@ -25,6 +25,7 @@ export type PredictionItem = {
   window: SupportedWindow;
   snapshotCount: number;
   progress: number;
+  modelConfidence: number;
   confidence: number;
   predictedDelta: number;
   predictedDirection: "UP" | "DOWN";
