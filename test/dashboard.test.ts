@@ -6,6 +6,7 @@ import { DashboardPageService } from "../src/dashboard/dashboard-page.service.ts
 import { DashboardService } from "../src/dashboard/dashboard.service.ts";
 
 test("DashboardService renders the live dashboard with polling and compact history access", async () => {
+  const expectedLastUpdate = new Intl.DateTimeFormat(undefined, { dateStyle: "short", timeStyle: "short" }).format(new Date("2026-03-13T00:04:00.000Z"));
   const dashboardService = new DashboardService({
     collectorClientService: {
       loadState: async () => ({
@@ -176,7 +177,9 @@ test("DashboardService renders the live dashboard with polling and compact histo
   const htmlDocument = await dashboardService.buildHtmlDocument();
 
   assert.match(htmlDocument, /Last update/);
-  assert.match(htmlDocument, /2026-03-13 00:04:00 UTC/);
+  assert.match(htmlDocument, /Total result/);
+  assert.match(htmlDocument, new RegExp(expectedLastUpdate.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.match(htmlDocument, />-\$17\.60<\/strong>/);
   assert.match(htmlDocument, /BTC 5m/);
   assert.match(htmlDocument, /class="latest-call up"/);
   assert.match(htmlDocument, />101\.25</);

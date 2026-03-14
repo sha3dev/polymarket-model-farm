@@ -34,6 +34,8 @@ type DashboardTemplateValues = Record<string, string>;
  */
 
 export class DashboardPageService {
+  private static readonly DASHBOARD_DATE_FORMATTER = new Intl.DateTimeFormat(undefined, { dateStyle: "short", timeStyle: "short" });
+
   /**
    * @section private:methods
    */
@@ -41,11 +43,7 @@ export class DashboardPageService {
   private formatDashboardDate(dateIso: string): string {
     const date = new Date(dateIso);
     const hasValidDate = !Number.isNaN(date.getTime());
-    const formattedDate = hasValidDate
-      ? `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(date.getUTCDate()).padStart(2, "0")} ${String(date.getUTCHours()).padStart(2, "0")}:${String(
-          date.getUTCMinutes(),
-        ).padStart(2, "0")}:${String(date.getUTCSeconds()).padStart(2, "0")} UTC`
-      : dateIso;
+    const formattedDate = hasValidDate ? DashboardPageService.DASHBOARD_DATE_FORMATTER.format(date) : dateIso;
     return formattedDate;
   }
 
@@ -65,6 +63,11 @@ export class DashboardPageService {
   private renderFact(label: string, value: string, hint: string): string {
     const factMarkup = this.renderTemplate(DASHBOARD_FACT_TEMPLATE, { DASHBOARD_FACT_LABEL: label, DASHBOARD_FACT_VALUE: value, DASHBOARD_FACT_HINT: hint });
     return factMarkup;
+  }
+
+  private formatUsd(value: number | null): string {
+    const formattedUsd = value === null ? "--" : `${value >= 0 ? "+" : "-"}$${Math.abs(value).toFixed(2)}`;
+    return formattedUsd;
   }
 
   private readPredictedContractPrice(card: DashboardModelCard): number | null {
@@ -95,7 +98,7 @@ export class DashboardPageService {
 
   private renderStatusFacts(card: DashboardModelCard): string {
     const predictionConfidence = card.latestPrediction?.confidence.toFixed(2) || "--";
-    const resultValue = card.resultUsd === null ? "--" : `${card.resultUsd >= 0 ? "+" : "-"}$${Math.abs(card.resultUsd).toFixed(2)}`;
+    const resultValue = this.formatUsd(card.resultUsd);
     const hitRateValue = card.hitRatePercent === null ? "--" : `${card.hitRatePercent.toFixed(0)}%`;
     const factMarkup = [
       this.renderFact("Result", resultValue, "Total USD result from buying 5 shares on each valid resolved prediction at the entry price."),
@@ -148,7 +151,7 @@ export class DashboardPageService {
   private renderMainMarkup(payload: DashboardPayload): string {
     const fiveMinuteCards = payload.cards.filter((card) => card.window === "5m");
     const fifteenMinuteCards = payload.cards.filter((card) => card.window === "15m");
-    const updateMarkup = this.renderTemplate(DASHBOARD_UPDATE_BAR_TEMPLATE, { DASHBOARD_GENERATED_AT: this.formatDashboardDate(payload.generatedAt) });
+    const updateMarkup = this.renderTemplate(DASHBOARD_UPDATE_BAR_TEMPLATE, { DASHBOARD_GENERATED_AT: this.formatDashboardDate(payload.generatedAt), DASHBOARD_TOTAL_RESULT: this.formatUsd(payload.totalResultUsd) });
     const mainMarkup = this.renderTemplate(DASHBOARD_MAIN_TEMPLATE, {
       DASHBOARD_UPDATE_BAR: updateMarkup,
       DASHBOARD_FIVE_MINUTE_SECTION: this.renderWindowSection("5m", fiveMinuteCards),

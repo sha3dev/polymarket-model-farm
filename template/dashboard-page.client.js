@@ -3,29 +3,22 @@ const payloadElement = document.getElementById("dashboard-payload");
 const historyModal = document.getElementById("history-modal");
 const historyModalBody = document.getElementById("history-modal-body");
 let currentPayload = payloadElement ? JSON.parse(payloadElement.textContent || '{"generatedAt":"","cards":[]}') : { generatedAt: "", cards: [] };
+const dashboardDateFormatter = new Intl.DateTimeFormat(undefined, { dateStyle: "short", timeStyle: "short" });
 
 const formatDashboardDate = (dateIso) => {
   const date = new Date(dateIso);
   const hasValidDate = !Number.isNaN(date.getTime());
-  const formattedDate = hasValidDate
-    ? date.getUTCFullYear() +
-      "-" +
-      String(date.getUTCMonth() + 1).padStart(2, "0") +
-      "-" +
-      String(date.getUTCDate()).padStart(2, "0") +
-      " " +
-      String(date.getUTCHours()).padStart(2, "0") +
-      ":" +
-      String(date.getUTCMinutes()).padStart(2, "0") +
-      ":" +
-      String(date.getUTCSeconds()).padStart(2, "0") +
-      " UTC"
-    : dateIso;
+  const formattedDate = hasValidDate ? dashboardDateFormatter.format(date) : dateIso;
   return formattedDate;
 };
 
 const renderFact = (label, value, hint) =>
   '<li class="fact-item"><span class="hint-label" title="' + hint + '">' + label + '</span><strong class="fact-value">' + value + "</strong></li>";
+
+const formatUsd = (value) => {
+  const formattedUsd = value === null ? "--" : (value >= 0 ? "+$" : "-$") + Math.abs(value).toFixed(2);
+  return formattedUsd;
+};
 
 const renderHistoryRows = (card) => {
   const resolvedHistory = card.predictionHistory.filter((entry) => entry.actualDirection !== null).slice(0, 6);
@@ -102,7 +95,7 @@ const renderCard = (card) => {
   const predictedContractPriceValue = predictedContractPrice === null ? "--" : predictedContractPrice.toFixed(3);
   const referencePrice = card.referencePrice === null ? "N/A" : card.referencePrice.toFixed(2);
   const targetPrice = card.priceToBeat === null ? "N/A" : card.priceToBeat.toFixed(2);
-  const resultValue = card.resultUsd === null ? "--" : (card.resultUsd >= 0 ? "+$" : "-$") + Math.abs(card.resultUsd).toFixed(2);
+  const resultValue = formatUsd(card.resultUsd);
   const hitRateValue = card.hitRatePercent === null ? "--" : card.hitRatePercent.toFixed(0) + "%";
   const historyRowCount = Math.min(card.predictionHistory.filter((entry) => entry.actualDirection !== null).length, 6);
   const factMarkup = [
@@ -168,7 +161,9 @@ const renderDashboard = (payload) => {
   dashboardRoot.innerHTML =
     '<section class="update-bar"><div><span class="eyebrow">Last update</span><strong class="update-value">' +
     formatDashboardDate(payload.generatedAt) +
-    '</strong></div></section>' +
+    '</strong></div><div><span class="eyebrow">Total result</span><strong class="update-value">' +
+    formatUsd(payload.totalResultUsd ?? null) +
+    "</strong></div></section>" +
     renderWindowSection("5m", fiveMinuteCards) +
     renderWindowSection("15m", fifteenMinuteCards);
   if (activeHistoryKey) {

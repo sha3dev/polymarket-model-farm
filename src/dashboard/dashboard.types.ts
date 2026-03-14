@@ -33,5 +33,6 @@ export type DashboardModelCard = {
 
 export type DashboardPayload = {
   generatedAt: string;
+  totalResultUsd: number | null;
   cards: DashboardModelCard[];
 };

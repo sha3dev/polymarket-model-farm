@@ -167,7 +167,8 @@ export class DashboardService {
         }
       }
     }
-    return { generatedAt: this.now(), cards };
+    const totalResultUsd = cards.reduce((sum, card) => sum + (card.resultUsd || 0), 0);
+    return { generatedAt: this.now(), totalResultUsd, cards };
   }
 
   public async buildHtmlDocument(): Promise<string> {
