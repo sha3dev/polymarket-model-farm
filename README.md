@@ -142,8 +142,33 @@ Behavior notes:
 
 - predictions are attempted at each configured progress step from `LIVE_PREDICTION_PROGRESS_STEPS`
 - the first attempt whose confidence clears `MIN_VALID_PREDICTION_CONFIDENCE` is the one persisted for that market
-- confidence is the model-estimated probability of the chosen direction in `[0.5, 1.0]`
-- higher confidence means the model believes the selected side is more likely to win
+- confidence is a blended probability in `[0, 1]` that combines the model view with the live market price when `UP/DOWN` prices exist
+- higher confidence means the final blended view is more favorable to the chosen side
+- confidence is calculated in six steps:
+  1. the model outputs a bounded value in `[-1, 1]`
+     `-1` means a very strong negative delta estimate, `+1` means a very strong positive delta estimate, and values near `0` mean the model is close to neutral
+     this bounded output exists because the training target is squashed through `tanh`, so the network learns a stable normalized version of the final delta instead of an unbounded raw price move
+     during training, the real target delta is:
+     `rawTargetDelta = (finalChainlinkPrice - priceToBeat) / priceToBeat`
+     and the bounded target given to the model is:
+     `boundedTarget = tanh(rawTargetDelta / DELTA_TARGET_SCALE)`
+     we use `boundedTarget` because the raw delta is unbounded and can contain tails or rare large moves that would otherwise dominate the loss
+     bounding the target keeps training numerically stable, preserves the sign of the move, and still lets the model express stronger vs weaker outcomes inside a controlled range
+  2. that value is converted back into an unbounded `predictedDelta` with `atanh(modelOutput) * DELTA_TARGET_SCALE`
+  3. a confidence reference delta is chosen from the smallest positive real delta signal available for that slot:
+     `min(recentReferenceDelta, prevBeatMeanDelta)`, with a fallback floor of `0.0001`
+  4. the raw model probability is `modelPUp = sigmoid(predictedDelta / (confidenceReferenceDelta * CONFIDENCE_DELTA_FACTOR))`
+  5. if the latest snapshot has a live `upPrice` or `downPrice`, the market-implied `p(UP)` is read from that price and converted to log-odds
+  6. the final blended `p(UP)` is:
+     `sigmoid(logit(modelPUp) * CONFIDENCE_MODEL_WEIGHT + logit(marketPUp) * CONFIDENCE_MARKET_WEIGHT)`
+- if `predictedDelta >= 0`, the stored confidence is the blended `p(UP)`; otherwise it is the blended `p(DOWN) = 1 - p(UP)`
+- if no live `UP/DOWN` price is available, confidence falls back to the raw model probability
+- this means confidence measures directional likelihood after blending model conviction with market conviction; it is not expected PnL
+- inverse reading examples:
+  - `confidence = 0.50` means the final blended log-odds are near `0`; either the model is near-neutral, or the model and market are offsetting each other
+  - `confidence = 0.20` on an `UP` call means the model may still point `UP`, but once market pricing is included the final `UP` probability looks weak and likely should not pass the trading threshold
+  - `confidence = 0.70` means the combined model+market view materially favors the chosen side
+  - `confidence = 0.90` means both the model signal and the market-adjusted blend still strongly support the chosen side
 
 ### `GET /api/dashboard`
 
@@ -287,8 +312,9 @@ type PredictionResponsePayload = { predictions: PredictionItem[] };
 
 Behavior notes:
 
-- `PredictionItem.confidence` is an unsigned probability-style score in `[0.5, 1.0]`
+- `PredictionItem.confidence` is a blended probability-style score in `[0, 1]`
 - `PredictionItem.predictedDelta` is the unbounded delta estimate restored from the model output
+- `PredictionItem.confidence` is derived from `predictedDelta`, the slot reference delta, the live `UP/DOWN` price when available, and the confidence weight config; it is not a raw neural-network output field
 
 ### `DashboardPayload`
 
@@ -339,6 +365,9 @@ All runtime defaults live in `src/config.ts`.
 - `config.MIN_TRAINED_MARKETS_FOR_PREDICTION`: minimum closed-market count required before a slot can emit live predictions.
 - `config.PREDICTION_HISTORY_LIMIT`: maximum stored live predictions per pair.
 - `config.CONFIDENCE_DELTA_FACTOR`: factor that maps predicted delta into a probability-style confidence score.
+  Lower values make confidence more aggressive; higher values compress it closer to `0.5`.
+- `config.CONFIDENCE_MODEL_WEIGHT`: weight of the model log-odds inside the blended confidence calculation.
+- `config.CONFIDENCE_MARKET_WEIGHT`: weight of the market-implied log-odds inside the blended confidence calculation.
 - `config.MIN_VALID_PREDICTION_CONFIDENCE`: minimum confidence required for a live prediction to be persisted and for a resolved prediction to count toward dashboard result and hit rate.
 - `config.SHOULD_RECALCULATE_HISTORY_CONFIDENCE_ON_STARTUP`: when `true`, rewrites persisted history confidence values during startup using the current confidence formula.
 - `config.LIVE_PREDICTION_PROGRESS_STEPS`: ordered list of staged live-prediction thresholds between `0` and `1`.

@@ -26,7 +26,7 @@ test("PredictionService converts model delta into directional confidence", async
   assert.equal(prediction.predictedDirection, "UP");
   assert.equal(prediction.snapshotCount, 2);
   assert.ok(prediction.predictedDelta > 0);
-  assert.ok(prediction.confidence >= 0.5);
+  assert.ok(prediction.confidence >= 0);
   assert.ok(prediction.confidence <= 1);
   assert.equal(prediction.modelVersion, "model-v1");
 });
@@ -41,9 +41,25 @@ test("PredictionService does not collapse confidence around fifty percent when r
     now: () => "2026-03-13T00:00:00.000Z",
   });
 
-  const prediction = await predictionService.buildPrediction(buildMarketInput());
+  const prediction = await predictionService.buildPrediction(buildMarketInput({ upPrice: null, downPrice: null }));
 
   assert.ok(prediction.confidence > 0.9);
+});
+
+test("PredictionService tempers model confidence when the market strongly prices the opposite side", async () => {
+  const predictionService = new PredictionService({
+    modelRegistryService: {
+      predict: async () => 0.05,
+      getPredictionContext: () => ({ metadata: null, trainedMarketCount: 120, modelVersion: "model-v1", hasCheckpoint: true, recentReferenceDelta: 0.0005 }),
+    } as unknown as ConstructorParameters<typeof PredictionService>[0]["modelRegistryService"],
+    marketFeatureProjectorService: { projectSequence: () => ({ labels: ["progress"], rows: [[0.5]], maxSequenceLength: 600 }) } as unknown as ConstructorParameters<typeof PredictionService>[0]["marketFeatureProjectorService"],
+    now: () => "2026-03-13T00:00:00.000Z",
+  });
+
+  const prediction = await predictionService.buildPrediction(buildMarketInput({ upPrice: 0.1, downPrice: 0.9 }));
+
+  assert.equal(prediction.predictedDirection, "UP");
+  assert.ok(prediction.confidence < 0.5);
 });
 
 test("PredictionService rejects markets without historical price-to-beat", async () => {
@@ -511,7 +527,11 @@ test("PredictionHistoryService recalculates stored confidence values during init
   await predictionHistoryService.initialize();
 
   const history = await predictionHistoryService.loadHistory({ asset: "btc", window: "5m" });
-  const expectedConfidence = 1 / (1 + Math.exp(-(0.02 / (0.04 * config.CONFIDENCE_DELTA_FACTOR))));
+  const modelLogit = 0.02 / (0.04 * config.CONFIDENCE_DELTA_FACTOR);
+  const modelProbability = 1 / (1 + Math.exp(-modelLogit));
+  const marketLogit = Math.log(0.3 / 0.7);
+  const blendedLogit = Math.log(modelProbability / (1 - modelProbability)) * config.CONFIDENCE_MODEL_WEIGHT + marketLogit * config.CONFIDENCE_MARKET_WEIGHT;
+  const expectedConfidence = 1 / (1 + Math.exp(-blendedLogit));
 
   assert.equal(history.entries.length, 1);
   assert.equal(history.entries[0]?.confidence, expectedConfidence);
@@ -533,8 +553,8 @@ test("PredictionHistoryService keeps recalculated confidence expressive for smal
           predictionMadeAt: "2026-03-13T18:08:51.626Z",
           progressWhenPredicted: 0.76,
           observedPrice: 71038.28,
-          upPrice: 0.3,
-          downPrice: 0.71,
+          upPrice: null,
+          downPrice: null,
           predictedDelta: 0.001,
           confidence: 0.01,
           predictedDirection: "UP",
@@ -602,7 +622,9 @@ test("PredictionHistoryService can skip stored confidence recalculation on start
   assert.equal(history.entries[0]?.confidence, 0.01);
 });
 
-function buildMarketInput(): PredictionMarketInput {
+function buildMarketInput(options?: { upPrice?: number | null; downPrice?: number | null }): PredictionMarketInput {
+  const upPrice = options?.upPrice === undefined ? 0.59 : options.upPrice;
+  const downPrice = options?.downPrice === undefined ? 0.41 : options.downPrice;
   return {
     asset: "btc",
     window: "5m",
@@ -613,7 +635,7 @@ function buildMarketInput(): PredictionMarketInput {
     prevPriceToBeat: [99.8, 100.1],
     snapshots: [
       buildPredictionSnapshot("2026-03-13T00:00:00.000Z", 0.53, 0.47, 100.14, 100.2, 100.15, 100.1, 100.18),
-      buildPredictionSnapshot("2026-03-13T00:04:00.000Z", 0.59, 0.41, 100.82, 100.8, 100.75, 100.78, 100.76),
+      buildPredictionSnapshot("2026-03-13T00:04:00.000Z", upPrice, downPrice, 100.82, 100.8, 100.75, 100.78, 100.76),
     ],
   };
 }
@@ -681,8 +703,8 @@ function buildLivePredictionMarketPayload(): Awaited<ReturnType<ConstructorParam
 
 function buildPredictionSnapshot(
   generatedAtIso: string,
-  upPrice: number,
-  downPrice: number,
+  upPrice: number | null,
+  downPrice: number | null,
   chainlinkPrice: number,
   binancePrice: number,
   coinbasePrice: number,
@@ -703,11 +725,11 @@ function buildPredictionSnapshot(
     priceToBeat: 100,
     upAssetId: null,
     upPrice,
-    upOrderBook: { bids: [{ price: upPrice - 0.01, size: 1 }], asks: [{ price: upPrice + 0.01, size: 1 }] },
+    upOrderBook: upPrice === null ? null : { bids: [{ price: upPrice - 0.01, size: 1 }], asks: [{ price: upPrice + 0.01, size: 1 }] },
     upEventTs: null,
     downAssetId: null,
     downPrice,
-    downOrderBook: { bids: [{ price: downPrice - 0.01, size: 1 }], asks: [{ price: downPrice + 0.01, size: 1 }] },
+    downOrderBook: downPrice === null ? null : { bids: [{ price: downPrice - 0.01, size: 1 }], asks: [{ price: downPrice + 0.01, size: 1 }] },
     downEventTs: null,
     ...exchangeFields,
   };

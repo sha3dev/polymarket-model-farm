@@ -30,6 +30,8 @@ type PredictionHistoryServiceOptions = {
 export class PredictionHistoryService {
   private static readonly MIN_CONFIDENCE_REFERENCE_DELTA = 0.0001;
 
+  private static readonly MIN_CONFIDENCE_PROBABILITY = 0.001;
+
   private readonly storageDirectoryPath: string;
 
   private readonly referenceDeltaReader: (pair: AssetWindow) => number;
@@ -80,15 +82,53 @@ export class PredictionHistoryService {
     return normalizedEntry;
   }
 
-  private readRecalculatedConfidence(pair: AssetWindow, predictedDelta: number): number {
+  private clamp(value: number, lowerBound: number, upperBound: number): number {
+    const clampedValue = Math.min(Math.max(value, lowerBound), upperBound);
+    return clampedValue;
+  }
+
+  private readModelUpProbability(predictedDelta: number, confidenceReferenceDelta: number): number {
+    const confidenceLogit = predictedDelta / (confidenceReferenceDelta * config.CONFIDENCE_DELTA_FACTOR);
+    const upProbability = 1 / (1 + Math.exp(-confidenceLogit));
+    return upProbability;
+  }
+
+  private readMarketUpProbability(entry: PredictionHistoryEntry): number | null {
+    const hasUpPrice = Number.isFinite(entry.upPrice);
+    const hasDownPrice = Number.isFinite(entry.downPrice);
+    let marketUpProbability: number | null = null;
+    if (hasUpPrice) {
+      marketUpProbability = this.clamp(entry.upPrice || 0, PredictionHistoryService.MIN_CONFIDENCE_PROBABILITY, 1 - PredictionHistoryService.MIN_CONFIDENCE_PROBABILITY);
+    } else {
+      if (hasDownPrice) {
+      marketUpProbability = this.clamp(1 - (entry.downPrice || 0), PredictionHistoryService.MIN_CONFIDENCE_PROBABILITY, 1 - PredictionHistoryService.MIN_CONFIDENCE_PROBABILITY);
+      }
+    }
+    return marketUpProbability;
+  }
+
+  private readAdjustedUpProbability(modelUpProbability: number, marketUpProbability: number | null): number {
+    const clampedModelUpProbability = this.clamp(modelUpProbability, PredictionHistoryService.MIN_CONFIDENCE_PROBABILITY, 1 - PredictionHistoryService.MIN_CONFIDENCE_PROBABILITY);
+    let adjustedUpProbability = clampedModelUpProbability;
+    if (marketUpProbability !== null) {
+      const modelLogit = Math.log(clampedModelUpProbability / (1 - clampedModelUpProbability));
+      const marketLogit = Math.log(marketUpProbability / (1 - marketUpProbability));
+      const blendedLogit = modelLogit * config.CONFIDENCE_MODEL_WEIGHT + marketLogit * config.CONFIDENCE_MARKET_WEIGHT;
+      adjustedUpProbability = 1 / (1 + Math.exp(-blendedLogit));
+    }
+    return adjustedUpProbability;
+  }
+
+  private readRecalculatedConfidence(pair: AssetWindow, entry: PredictionHistoryEntry): number {
     const referenceDelta = this.referenceDeltaReader(pair);
     const confidenceReferenceDelta =
       Number.isFinite(referenceDelta) && referenceDelta > 0
         ? Math.max(referenceDelta, PredictionHistoryService.MIN_CONFIDENCE_REFERENCE_DELTA)
         : PredictionHistoryService.MIN_CONFIDENCE_REFERENCE_DELTA;
-    const confidenceLogit = predictedDelta / (confidenceReferenceDelta * config.CONFIDENCE_DELTA_FACTOR);
-    const upProbability = 1 / (1 + Math.exp(-confidenceLogit));
-    const recalculatedConfidence = predictedDelta >= 0 ? upProbability : 1 - upProbability;
+    const modelUpProbability = this.readModelUpProbability(entry.predictedDelta, confidenceReferenceDelta);
+    const marketUpProbability = this.readMarketUpProbability(entry);
+    const adjustedUpProbability = this.readAdjustedUpProbability(modelUpProbability, marketUpProbability);
+    const recalculatedConfidence = entry.predictedDelta >= 0 ? adjustedUpProbability : 1 - adjustedUpProbability;
     return recalculatedConfidence;
   }
 
@@ -97,10 +137,7 @@ export class PredictionHistoryService {
     const history = JSON.parse(await fs.readFile(filePath, "utf8")) as PredictionHistory;
     const nextEntries = history.entries.map((entry) => {
       const normalizedEntry = this.normalizeEntry(entry);
-      const recalculatedConfidence = this.readRecalculatedConfidence(
-        { asset: normalizedEntry.asset, window: normalizedEntry.window },
-        normalizedEntry.predictedDelta,
-      );
+      const recalculatedConfidence = this.readRecalculatedConfidence({ asset: normalizedEntry.asset, window: normalizedEntry.window }, normalizedEntry);
       return { ...normalizedEntry, confidence: recalculatedConfidence };
     });
     const nextHistory = { entries: nextEntries };

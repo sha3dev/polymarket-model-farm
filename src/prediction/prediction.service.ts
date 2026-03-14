@@ -24,6 +24,8 @@ type PredictionServiceOptions = {
 export class PredictionService {
   private static readonly MIN_CONFIDENCE_REFERENCE_DELTA = 0.0001;
 
+  private static readonly MIN_CONFIDENCE_PROBABILITY = 0.001;
+
   private readonly modelRegistryService: ModelRegistryService;
 
   private readonly marketFeatureProjectorService: MarketFeatureProjectorService;
@@ -95,10 +97,44 @@ export class PredictionService {
 
   private computeConfidence(market: PredictionMarketInput, predictedDelta: number): number {
     const confidenceReferenceDelta = this.readConfidenceReferenceDelta(market);
+    const modelUpProbability = this.readModelUpProbability(predictedDelta, confidenceReferenceDelta);
+    const marketUpProbability = this.readMarketUpProbability(market);
+    const adjustedUpProbability = this.readAdjustedUpProbability(modelUpProbability, marketUpProbability);
+    const confidence = predictedDelta >= 0 ? adjustedUpProbability : 1 - adjustedUpProbability;
+    return confidence;
+  }
+
+  private readModelUpProbability(predictedDelta: number, confidenceReferenceDelta: number): number {
     const confidenceLogit = predictedDelta / (confidenceReferenceDelta * config.CONFIDENCE_DELTA_FACTOR);
     const upProbability = 1 / (1 + Math.exp(-confidenceLogit));
-    const confidence = predictedDelta >= 0 ? upProbability : 1 - upProbability;
-    return confidence;
+    return upProbability;
+  }
+
+  private readMarketUpProbability(market: PredictionMarketInput): number | null {
+    const latestSnapshot = market.snapshots[market.snapshots.length - 1] || null;
+    const hasUpPrice = Number.isFinite(latestSnapshot?.upPrice);
+    const hasDownPrice = Number.isFinite(latestSnapshot?.downPrice);
+    let marketUpProbability: number | null = null;
+    if (hasUpPrice) {
+      marketUpProbability = this.clamp(latestSnapshot?.upPrice || 0, PredictionService.MIN_CONFIDENCE_PROBABILITY, 1 - PredictionService.MIN_CONFIDENCE_PROBABILITY);
+    } else {
+      if (hasDownPrice) {
+      marketUpProbability = this.clamp(1 - (latestSnapshot?.downPrice || 0), PredictionService.MIN_CONFIDENCE_PROBABILITY, 1 - PredictionService.MIN_CONFIDENCE_PROBABILITY);
+      }
+    }
+    return marketUpProbability;
+  }
+
+  private readAdjustedUpProbability(modelUpProbability: number, marketUpProbability: number | null): number {
+    const clampedModelUpProbability = this.clamp(modelUpProbability, PredictionService.MIN_CONFIDENCE_PROBABILITY, 1 - PredictionService.MIN_CONFIDENCE_PROBABILITY);
+    let adjustedUpProbability = clampedModelUpProbability;
+    if (marketUpProbability !== null) {
+      const modelLogit = Math.log(clampedModelUpProbability / (1 - clampedModelUpProbability));
+      const marketLogit = Math.log(marketUpProbability / (1 - marketUpProbability));
+      const blendedLogit = modelLogit * config.CONFIDENCE_MODEL_WEIGHT + marketLogit * config.CONFIDENCE_MARKET_WEIGHT;
+      adjustedUpProbability = 1 / (1 + Math.exp(-blendedLogit));
+    }
+    return adjustedUpProbability;
   }
 
   private assertValidMarketInput(market: PredictionMarketInput): void {
