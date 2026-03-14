@@ -176,6 +176,7 @@ test("DashboardService renders the live dashboard with polling and compact histo
   const htmlDocument = await dashboardService.buildHtmlDocument();
 
   assert.match(htmlDocument, /Last update/);
+  assert.match(htmlDocument, /2026-03-13 00:04:00 UTC/);
   assert.match(htmlDocument, /BTC 5m/);
   assert.match(htmlDocument, /class="latest-call up"/);
   assert.match(htmlDocument, />101\.25</);
@@ -184,6 +185,7 @@ test("DashboardService renders the live dashboard with polling and compact histo
   assert.match(htmlDocument, />50%<\/strong>/);
   assert.match(htmlDocument, /data-history-button="btc-5m"/);
   assert.match(htmlDocument, /id="history-modal"/);
+  assert.match(htmlDocument, /<th>Entry price<\/th>/);
   assert.match(htmlDocument, /thead th \{ text-transform: uppercase;/);
   assert.match(htmlDocument, /window\.fetch\("\/api\/dashboard"/);
   assert.doesNotMatch(htmlDocument, /window\.location\.reload/);

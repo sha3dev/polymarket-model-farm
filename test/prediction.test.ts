@@ -31,6 +31,21 @@ test("PredictionService converts model delta into directional confidence", async
   assert.equal(prediction.modelVersion, "model-v1");
 });
 
+test("PredictionService does not collapse confidence around fifty percent when recent deltas are small", async () => {
+  const predictionService = new PredictionService({
+    modelRegistryService: {
+      predict: async () => 0.05,
+      getPredictionContext: () => ({ metadata: null, trainedMarketCount: 120, modelVersion: "model-v1", hasCheckpoint: true, recentReferenceDelta: 0.0005 }),
+    } as unknown as ConstructorParameters<typeof PredictionService>[0]["modelRegistryService"],
+    marketFeatureProjectorService: { projectSequence: () => ({ labels: ["progress"], rows: [[0.5]], maxSequenceLength: 600 }) } as unknown as ConstructorParameters<typeof PredictionService>[0]["marketFeatureProjectorService"],
+    now: () => "2026-03-13T00:00:00.000Z",
+  });
+
+  const prediction = await predictionService.buildPrediction(buildMarketInput());
+
+  assert.ok(prediction.confidence > 0.9);
+});
+
 test("PredictionService rejects markets without historical price-to-beat", async () => {
   const predictionService = new PredictionService({
     modelRegistryService: {
@@ -500,6 +515,45 @@ test("PredictionHistoryService recalculates stored confidence values during init
 
   assert.equal(history.entries.length, 1);
   assert.equal(history.entries[0]?.confidence, expectedConfidence);
+});
+
+test("PredictionHistoryService keeps recalculated confidence expressive for small reference deltas", async () => {
+  const storageDirectoryPath = await fs.mkdtemp(path.join(os.tmpdir(), "prediction-history-test-"));
+  const predictionHistoryService = new PredictionHistoryService({ storageDirectoryPath, referenceDeltaReader: () => 0.0005 });
+  await fs.writeFile(
+    path.join(storageDirectoryPath, "btc-5m.json"),
+    JSON.stringify({
+      entries: [
+        {
+          slug: "btc-updown-5m-1773425100",
+          asset: "btc",
+          window: "5m",
+          marketStart: "2026-03-13T18:05:00.000Z",
+          marketEnd: "2026-03-13T18:10:00.000Z",
+          predictionMadeAt: "2026-03-13T18:08:51.626Z",
+          progressWhenPredicted: 0.76,
+          observedPrice: 71038.28,
+          upPrice: 0.3,
+          downPrice: 0.71,
+          predictedDelta: 0.001,
+          confidence: 0.01,
+          predictedDirection: "UP",
+          modelVersion: "btc-5m-2026-03-13T18:07:48.948Z",
+          actualDelta: null,
+          actualDirection: null,
+          isCorrect: null,
+        },
+      ],
+    }),
+    "utf8",
+  );
+
+  await predictionHistoryService.initialize();
+
+  const history = await predictionHistoryService.loadHistory({ asset: "btc", window: "5m" });
+
+  assert.equal(history.entries.length, 1);
+  assert.ok((history.entries[0]?.confidence || 0) > 0.9);
 });
 
 test("PredictionHistoryService can skip stored confidence recalculation on startup", async () => {

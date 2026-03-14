@@ -18,7 +18,7 @@ import type { PredictionService } from "./prediction.service.ts";
  */
 
 const RESOLUTION_RETRY_DELAY_MS = 30000;
-const PREDICTION_PROGRESS_STEPS = [0.5, config.LIVE_PREDICTION_PROGRESS, 0.9] as const;
+const PREDICTION_PROGRESS_STEPS = [...new Set(config.LIVE_PREDICTION_PROGRESS_STEPS)].sort((left, right) => left - right);
 const EARLIEST_PREDICTION_PROGRESS = Math.min(...PREDICTION_PROGRESS_STEPS);
 
 type LivePredictionServiceOptions = {
@@ -154,9 +154,7 @@ export class LivePredictionService {
       const pairSlugKey = `${pair.asset}-${pair.window}-${market.slug}`;
       const progress = this.readProgress(marketState);
       const attemptedThreshold = this.attemptedPredictionThresholdMap.get(pairSlugKey) || 0;
-      const eligiblePredictionThresholds = [...new Set(PREDICTION_PROGRESS_STEPS)].filter(
-        (predictionThreshold) => predictionThreshold > attemptedThreshold && progress >= predictionThreshold,
-      );
+      const eligiblePredictionThresholds = PREDICTION_PROGRESS_STEPS.filter((predictionThreshold) => predictionThreshold > attemptedThreshold && progress >= predictionThreshold);
       for (const predictionThreshold of eligiblePredictionThresholds) {
         const thresholdSnapshots = this.buildThresholdSnapshots(marketPayload, predictionThreshold);
         const predictionSnapshot = thresholdSnapshots[thresholdSnapshots.length - 1] || null;

@@ -20,7 +20,7 @@ This service exists to turn full Polymarket market lifecycles into recurrent Ten
 
 - trains eight GRU model slots continuously from the collector history
 - keeps exchange and Polymarket order book state as sequence features
-- emits staged live predictions at 50%, `LIVE_PREDICTION_PROGRESS`, and 90%, keeping the first one that clears the confidence threshold
+- emits staged live predictions at the configured `LIVE_PREDICTION_PROGRESS_STEPS`, keeping the first one that clears the confidence threshold
 - stores prediction history locally so hits and misses remain visible in the dashboard
 
 ## Setup
@@ -140,7 +140,7 @@ Returns the latest one-shot live predictions already emitted for the currently a
 
 Behavior notes:
 
-- predictions are attempted at 50%, `LIVE_PREDICTION_PROGRESS`, and 90% market progress
+- predictions are attempted at each configured progress step from `LIVE_PREDICTION_PROGRESS_STEPS`
 - the first attempt whose confidence clears `MIN_VALID_PREDICTION_CONFIDENCE` is the one persisted for that market
 - confidence is the model-estimated probability of the chosen direction in `[0.5, 1.0]`
 - higher confidence means the model believes the selected side is more likely to win
@@ -341,9 +341,9 @@ All runtime defaults live in `src/config.ts`.
 - `config.CONFIDENCE_DELTA_FACTOR`: factor that maps predicted delta into a probability-style confidence score.
 - `config.MIN_VALID_PREDICTION_CONFIDENCE`: minimum confidence required for a live prediction to be persisted and for a resolved prediction to count toward dashboard result and hit rate.
 - `config.SHOULD_RECALCULATE_HISTORY_CONFIDENCE_ON_STARTUP`: when `true`, rewrites persisted history confidence values during startup using the current confidence formula.
-- `config.LIVE_PREDICTION_PROGRESS`: middle staged prediction threshold used between the fixed 50% and 90% attempts.
+- `config.LIVE_PREDICTION_PROGRESS_STEPS`: ordered list of staged live-prediction thresholds between `0` and `1`.
 - `config.LIVE_PREDICTION_POLL_INTERVAL_MS`: polling cadence for current live markets.
-- `config.COLLECTOR_STATE_CACHE_TTL_MS`: in-memory TTL for `/state`.
+- `config.COLLECTOR_STATE_CACHE_TTL_MS`: in-memory TTL for `/state`, `1000ms` by default so the dashboard can show live movement.
 - `config.COLLECTOR_MARKET_CACHE_TTL_MS`: in-memory TTL for `/markets`.
 - `config.COLLECTOR_SNAPSHOT_CACHE_TTL_MS`: in-memory TTL for `/markets/:slug/snapshots`.
 
@@ -370,7 +370,7 @@ All runtime defaults live in `src/config.ts`.
 
 ### No models are predicting yet
 
-The prediction route only returns markets that already crossed the first staged threshold at 50% progress and for which a model checkpoint exists.
+The prediction route only returns markets that already crossed the first configured staged threshold in `LIVE_PREDICTION_PROGRESS_STEPS` and for which a model checkpoint exists.
 
 ### The trainer appears idle
 

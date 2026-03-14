@@ -4,6 +4,26 @@ const historyModal = document.getElementById("history-modal");
 const historyModalBody = document.getElementById("history-modal-body");
 let currentPayload = payloadElement ? JSON.parse(payloadElement.textContent || '{"generatedAt":"","cards":[]}') : { generatedAt: "", cards: [] };
 
+const formatDashboardDate = (dateIso) => {
+  const date = new Date(dateIso);
+  const hasValidDate = !Number.isNaN(date.getTime());
+  const formattedDate = hasValidDate
+    ? date.getUTCFullYear() +
+      "-" +
+      String(date.getUTCMonth() + 1).padStart(2, "0") +
+      "-" +
+      String(date.getUTCDate()).padStart(2, "0") +
+      " " +
+      String(date.getUTCHours()).padStart(2, "0") +
+      ":" +
+      String(date.getUTCMinutes()).padStart(2, "0") +
+      ":" +
+      String(date.getUTCSeconds()).padStart(2, "0") +
+      " UTC"
+    : dateIso;
+  return formattedDate;
+};
+
 const renderFact = (label, value, hint) =>
   '<li class="fact-item"><span class="hint-label" title="' + hint + '">' + label + '</span><strong class="fact-value">' + value + "</strong></li>";
 
@@ -11,9 +31,13 @@ const renderHistoryRows = (card) => {
   const resolvedHistory = card.predictionHistory.filter((entry) => entry.actualDirection !== null).slice(0, 6);
   const historyRows = resolvedHistory
     .map(
-      (entry) =>
+      (entry) => {
+        const entryPrice = entry.predictedDirection === "UP" ? entry.upPrice : entry.downPrice;
+        return (
         "<tr><td>" +
-        entry.marketEnd +
+        formatDashboardDate(entry.marketEnd) +
+        "</td><td>" +
+        (entryPrice === null ? "--" : entryPrice.toFixed(3)) +
         "</td><td>" +
         entry.predictedDirection +
         "</td><td>" +
@@ -22,10 +46,12 @@ const renderHistoryRows = (card) => {
         entry.confidence.toFixed(2) +
         "</td><td>" +
         (entry.isCorrect ? "Hit" : "Miss") +
-        "</td></tr>",
+        "</td></tr>"
+        );
+      },
     )
     .join("");
-  const historyMarkup = historyRows || '<tr><td colspan="5" class="empty-cell">No resolved predictions yet.</td></tr>';
+  const historyMarkup = historyRows || '<tr><td colspan="6" class="empty-cell">No resolved predictions yet.</td></tr>';
   return historyMarkup;
 };
 
@@ -58,7 +84,7 @@ const openHistoryModal = (historyKey) => {
     card.window +
     '</h4><p class="history-caption">Latest ' +
     settledRowCount +
-    ' settled rows</p></div><button class="history-close" type="button" data-history-close="true">Close</button></div><div class="history-dialog-body"><table><thead><tr><th>Market End</th><th>Model</th><th>Actual</th><th>Conf</th><th>Result</th></tr></thead><tbody>' +
+    ' settled rows</p></div><button class="history-close" type="button" data-history-close="true">Close</button></div><div class="history-dialog-body"><table><thead><tr><th>Market End</th><th>Entry price</th><th>Model</th><th>Actual</th><th>Conf</th><th>Result</th></tr></thead><tbody>' +
     renderHistoryRows(card) +
     "</tbody></table></div>";
 };
@@ -141,7 +167,7 @@ const renderDashboard = (payload) => {
   const fifteenMinuteCards = payload.cards.filter((card) => card.window === "15m");
   dashboardRoot.innerHTML =
     '<section class="update-bar"><div><span class="eyebrow">Last update</span><strong class="update-value">' +
-    payload.generatedAt +
+    formatDashboardDate(payload.generatedAt) +
     '</strong></div></section>' +
     renderWindowSection("5m", fiveMinuteCards) +
     renderWindowSection("15m", fifteenMinuteCards);

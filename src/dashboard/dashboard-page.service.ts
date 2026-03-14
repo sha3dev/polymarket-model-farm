@@ -38,6 +38,17 @@ export class DashboardPageService {
    * @section private:methods
    */
 
+  private formatDashboardDate(dateIso: string): string {
+    const date = new Date(dateIso);
+    const hasValidDate = !Number.isNaN(date.getTime());
+    const formattedDate = hasValidDate
+      ? `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(date.getUTCDate()).padStart(2, "0")} ${String(date.getUTCHours()).padStart(2, "0")}:${String(
+          date.getUTCMinutes(),
+        ).padStart(2, "0")}:${String(date.getUTCSeconds()).padStart(2, "0")} UTC`
+      : dateIso;
+    return formattedDate;
+  }
+
   private renderTemplate(template: string, values: DashboardTemplateValues): string {
     let renderedTemplate = template;
     for (const [placeholder, value] of Object.entries(values)) {
@@ -137,7 +148,7 @@ export class DashboardPageService {
   private renderMainMarkup(payload: DashboardPayload): string {
     const fiveMinuteCards = payload.cards.filter((card) => card.window === "5m");
     const fifteenMinuteCards = payload.cards.filter((card) => card.window === "15m");
-    const updateMarkup = this.renderTemplate(DASHBOARD_UPDATE_BAR_TEMPLATE, { DASHBOARD_GENERATED_AT: payload.generatedAt });
+    const updateMarkup = this.renderTemplate(DASHBOARD_UPDATE_BAR_TEMPLATE, { DASHBOARD_GENERATED_AT: this.formatDashboardDate(payload.generatedAt) });
     const mainMarkup = this.renderTemplate(DASHBOARD_MAIN_TEMPLATE, {
       DASHBOARD_UPDATE_BAR: updateMarkup,
       DASHBOARD_FIVE_MINUTE_SECTION: this.renderWindowSection("5m", fiveMinuteCards),

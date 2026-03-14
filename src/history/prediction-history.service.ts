@@ -28,6 +28,8 @@ type PredictionHistoryServiceOptions = {
  */
 
 export class PredictionHistoryService {
+  private static readonly MIN_CONFIDENCE_REFERENCE_DELTA = 0.0001;
+
   private readonly storageDirectoryPath: string;
 
   private readonly referenceDeltaReader: (pair: AssetWindow) => number;
@@ -79,7 +81,11 @@ export class PredictionHistoryService {
   }
 
   private readRecalculatedConfidence(pair: AssetWindow, predictedDelta: number): number {
-    const confidenceReferenceDelta = Math.max(this.referenceDeltaReader(pair), config.DELTA_TARGET_SCALE, 1e-9);
+    const referenceDelta = this.referenceDeltaReader(pair);
+    const confidenceReferenceDelta =
+      Number.isFinite(referenceDelta) && referenceDelta > 0
+        ? Math.max(referenceDelta, PredictionHistoryService.MIN_CONFIDENCE_REFERENCE_DELTA)
+        : PredictionHistoryService.MIN_CONFIDENCE_REFERENCE_DELTA;
     const confidenceLogit = predictedDelta / (confidenceReferenceDelta * config.CONFIDENCE_DELTA_FACTOR);
     const upProbability = 1 / (1 + Math.exp(-confidenceLogit));
     const recalculatedConfidence = predictedDelta >= 0 ? upProbability : 1 - upProbability;

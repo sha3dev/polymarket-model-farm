@@ -22,6 +22,8 @@ type PredictionServiceOptions = {
  */
 
 export class PredictionService {
+  private static readonly MIN_CONFIDENCE_REFERENCE_DELTA = 0.0001;
+
   private readonly modelRegistryService: ModelRegistryService;
 
   private readonly marketFeatureProjectorService: MarketFeatureProjectorService;
@@ -82,10 +84,17 @@ export class PredictionService {
     return prevBeatMeanDelta;
   }
 
-  private computeConfidence(market: PredictionMarketInput, predictedDelta: number): number {
+  private readConfidenceReferenceDelta(market: PredictionMarketInput): number {
     const predictionContext = this.modelRegistryService.getPredictionContext({ asset: market.asset, window: market.window });
     const fallbackReferenceDelta = this.readPrevBeatMeanDelta(market);
-    const confidenceReferenceDelta = Math.max(predictionContext.recentReferenceDelta, fallbackReferenceDelta, config.DELTA_TARGET_SCALE, 1e-9);
+    const referenceCandidates = [predictionContext.recentReferenceDelta, fallbackReferenceDelta].filter((referenceDelta) => Number.isFinite(referenceDelta) && referenceDelta > 0);
+    const confidenceReferenceDelta =
+      referenceCandidates.length === 0 ? PredictionService.MIN_CONFIDENCE_REFERENCE_DELTA : Math.max(Math.min(...referenceCandidates), PredictionService.MIN_CONFIDENCE_REFERENCE_DELTA);
+    return confidenceReferenceDelta;
+  }
+
+  private computeConfidence(market: PredictionMarketInput, predictedDelta: number): number {
+    const confidenceReferenceDelta = this.readConfidenceReferenceDelta(market);
     const confidenceLogit = predictedDelta / (confidenceReferenceDelta * config.CONFIDENCE_DELTA_FACTOR);
     const upProbability = 1 / (1 + Math.exp(-confidenceLogit));
     const confidence = predictedDelta >= 0 ? upProbability : 1 - upProbability;
