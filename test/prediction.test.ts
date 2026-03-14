@@ -18,6 +18,7 @@ test("config defaults the confidence weights and disagreement guard", () => {
   assert.deepEqual(config.LIVE_PREDICTION_PROGRESS_STEPS, [0.75, 0.9]);
   assert.equal(config.MIN_VALID_ENTRY_PRICE, 0.4);
   assert.equal(config.MAX_VALID_ENTRY_PRICE, 0.8);
+  assert.equal(config.MIN_VALID_PREDICTION_CONFIDENCE, 0.75);
 });
 
 test("PredictionService converts model delta into directional confidence", async () => {

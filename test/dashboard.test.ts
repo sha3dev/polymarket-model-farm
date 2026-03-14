@@ -180,13 +180,13 @@ test("DashboardService renders the live dashboard with polling and compact histo
   assert.match(htmlDocument, /5m result/);
   assert.match(htmlDocument, /15m result/);
   assert.match(htmlDocument, new RegExp(expectedLastUpdate.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-  assert.match(htmlDocument, />-\$8\.80<\/strong>/);
+  assert.match(htmlDocument, />\+\$2\.30<\/strong>/);
   assert.match(htmlDocument, /BTC 5m/);
   assert.match(htmlDocument, /class="latest-call up"/);
   assert.match(htmlDocument, />101\.25</);
   assert.match(htmlDocument, />0\.540</);
-  assert.match(htmlDocument, />-\$2\.20<\/strong>/);
-  assert.match(htmlDocument, />50%<\/strong>/);
+  assert.match(htmlDocument, />\+\$2\.30<\/strong>/);
+  assert.match(htmlDocument, />100%<\/strong>/);
   assert.match(htmlDocument, /data-history-button="btc-5m"/);
   assert.match(htmlDocument, /id="history-modal"/);
   assert.match(htmlDocument, /<th>Entry price<\/th>/);
