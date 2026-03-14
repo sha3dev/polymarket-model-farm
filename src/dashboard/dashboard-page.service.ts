@@ -151,7 +151,11 @@ export class DashboardPageService {
   private renderMainMarkup(payload: DashboardPayload): string {
     const fiveMinuteCards = payload.cards.filter((card) => card.window === "5m");
     const fifteenMinuteCards = payload.cards.filter((card) => card.window === "15m");
-    const updateMarkup = this.renderTemplate(DASHBOARD_UPDATE_BAR_TEMPLATE, { DASHBOARD_GENERATED_AT: this.formatDashboardDate(payload.generatedAt), DASHBOARD_TOTAL_RESULT: this.formatUsd(payload.totalResultUsd) });
+    const updateMarkup = this.renderTemplate(DASHBOARD_UPDATE_BAR_TEMPLATE, {
+      DASHBOARD_GENERATED_AT: this.formatDashboardDate(payload.generatedAt),
+      DASHBOARD_TOTAL_RESULT_5M: this.formatUsd(payload.totalResultUsd5m),
+      DASHBOARD_TOTAL_RESULT_15M: this.formatUsd(payload.totalResultUsd15m),
+    });
     const mainMarkup = this.renderTemplate(DASHBOARD_MAIN_TEMPLATE, {
       DASHBOARD_UPDATE_BAR: updateMarkup,
       DASHBOARD_FIVE_MINUTE_SECTION: this.renderWindowSection("5m", fiveMinuteCards),

@@ -33,6 +33,7 @@ export type DashboardModelCard = {
 
 export type DashboardPayload = {
   generatedAt: string;
-  totalResultUsd: number | null;
+  totalResultUsd5m: number | null;
+  totalResultUsd15m: number | null;
   cards: DashboardModelCard[];
 };

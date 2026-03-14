@@ -167,8 +167,9 @@ export class DashboardService {
         }
       }
     }
-    const totalResultUsd = cards.reduce((sum, card) => sum + (card.resultUsd || 0), 0);
-    return { generatedAt: this.now(), totalResultUsd, cards };
+    const totalResultUsd5m = cards.filter((card) => card.window === "5m").reduce((sum, card) => sum + (card.resultUsd || 0), 0);
+    const totalResultUsd15m = cards.filter((card) => card.window === "15m").reduce((sum, card) => sum + (card.resultUsd || 0), 0);
+    return { generatedAt: this.now(), totalResultUsd5m, totalResultUsd15m, cards };
   }
 
   public async buildHtmlDocument(): Promise<string> {

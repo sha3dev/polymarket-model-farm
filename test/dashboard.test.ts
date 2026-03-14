@@ -177,9 +177,10 @@ test("DashboardService renders the live dashboard with polling and compact histo
   const htmlDocument = await dashboardService.buildHtmlDocument();
 
   assert.match(htmlDocument, /Last update/);
-  assert.match(htmlDocument, /Total result/);
+  assert.match(htmlDocument, /5m result/);
+  assert.match(htmlDocument, /15m result/);
   assert.match(htmlDocument, new RegExp(expectedLastUpdate.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-  assert.match(htmlDocument, />-\$17\.60<\/strong>/);
+  assert.match(htmlDocument, />-\$8\.80<\/strong>/);
   assert.match(htmlDocument, /BTC 5m/);
   assert.match(htmlDocument, /class="latest-call up"/);
   assert.match(htmlDocument, />101\.25</);

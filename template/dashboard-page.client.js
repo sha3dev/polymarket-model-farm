@@ -161,8 +161,10 @@ const renderDashboard = (payload) => {
   dashboardRoot.innerHTML =
     '<section class="update-bar"><div><span class="eyebrow">Last update</span><strong class="update-value">' +
     formatDashboardDate(payload.generatedAt) +
-    '</strong></div><div><span class="eyebrow">Total result</span><strong class="update-value">' +
-    formatUsd(payload.totalResultUsd ?? null) +
+    '</strong></div><div><span class="eyebrow">5m result</span><strong class="update-value">' +
+    formatUsd(payload.totalResultUsd5m ?? null) +
+    '</strong></div><div><span class="eyebrow">15m result</span><strong class="update-value">' +
+    formatUsd(payload.totalResultUsd15m ?? null) +
     "</strong></div></section>" +
     renderWindowSection("5m", fiveMinuteCards) +
     renderWindowSection("15m", fifteenMinuteCards);
