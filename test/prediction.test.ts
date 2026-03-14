@@ -15,6 +15,9 @@ test("config defaults the confidence weights and disagreement guard", () => {
   assert.equal(config.CONFIDENCE_MODEL_WEIGHT, 1);
   assert.equal(config.CONFIDENCE_MARKET_WEIGHT, 1);
   assert.equal(config.MAX_MODEL_MARKET_DISAGREEMENT, 0.25);
+  assert.deepEqual(config.LIVE_PREDICTION_PROGRESS_STEPS, [0.75, 0.9]);
+  assert.equal(config.MIN_VALID_ENTRY_PRICE, 0.4);
+  assert.equal(config.MAX_VALID_ENTRY_PRICE, 0.8);
 });
 
 test("PredictionService converts model delta into directional confidence", async () => {
@@ -365,6 +368,53 @@ test("LivePredictionService rejects a prediction when model-market disagreement 
   assert.equal(recordedPredictions.length, 1);
   assert.equal(recordedPredictions[0]?.predictedDirection, "DOWN");
   assert.equal(recordedPredictions[0]?.progressWhenPredicted, 0.75);
+});
+
+test("LivePredictionService rejects a prediction when the entry price is outside the valid range", async () => {
+  const recordedPredictions: PredictionHistoryEntry[] = [];
+  const livePredictionService = new LivePredictionService({
+    collectorClientService: {
+      loadState: async () => buildLivePredictionStatePayload(),
+      loadMarketSnapshots: async () => ({
+        slug: "btc-updown-5m-1773425100",
+        asset: "btc",
+        window: "5m",
+        marketStart: "2026-03-13T18:05:00.000Z",
+        marketEnd: "2026-03-13T18:10:00.000Z",
+        snapshots: [buildLivePredictionSnapshot("2026-03-13T18:08:45.000Z", 0.19, 0.81), buildLivePredictionSnapshot("2026-03-13T18:09:30.000Z", 0.12, 0.88)],
+      }),
+    } as unknown as ConstructorParameters<typeof LivePredictionService>[0]["collectorClientService"],
+    predictionService: {
+      buildPrediction: async (market: PredictionMarketInput) => ({
+        slug: market.slug,
+        asset: market.asset,
+        window: market.window,
+        snapshotCount: market.snapshots.length,
+        progress: 0.75,
+        modelConfidence: 0.74,
+        confidence: 0.74,
+        predictedDelta: -0.01,
+        predictedDirection: "DOWN",
+        observedPrice: 70990,
+        modelVersion: "model-v1",
+        trainedMarketCount: 200,
+        generatedAt: "2026-03-13T18:08:45.000Z",
+      }),
+    } as unknown as ConstructorParameters<typeof LivePredictionService>[0]["predictionService"],
+    predictionHistoryService: {
+      getLatestPrediction: async () => null,
+      recordPrediction: async (_pair: { asset: string; window: string }, entry: PredictionHistoryEntry) => {
+        recordedPredictions.push(entry);
+      },
+      loadHistory: async () => ({ entries: [] }),
+      resolvePrediction: async () => {},
+    } as unknown as ConstructorParameters<typeof LivePredictionService>[0]["predictionHistoryService"],
+    now: () => "2026-03-13T18:09:31.000Z",
+  });
+
+  await livePredictionService.refreshOnce();
+
+  assert.equal(recordedPredictions.length, 0);
 });
 
 test("LivePredictionService initializes unresolved history only once across refresh cycles", async () => {

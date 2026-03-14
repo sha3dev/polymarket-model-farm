@@ -152,11 +152,18 @@ export class LivePredictionService {
     return marketSideProbability;
   }
 
+  private hasValidEntryPrice(prediction: PredictionItem, predictionSnapshot: Snapshot): boolean {
+    const entryPrice = this.readMarketSideProbability(predictionSnapshot, prediction.predictedDirection);
+    const hasValidEntryPrice = entryPrice !== null && entryPrice >= config.MIN_VALID_ENTRY_PRICE && entryPrice <= config.MAX_VALID_ENTRY_PRICE;
+    return hasValidEntryPrice;
+  }
+
   private shouldAcceptPrediction(prediction: PredictionItem, predictionSnapshot: Snapshot): boolean {
     const marketSideProbability = this.readMarketSideProbability(predictionSnapshot, prediction.predictedDirection);
     const hasAcceptableDisagreement =
       marketSideProbability === null || Math.abs(prediction.modelConfidence - marketSideProbability) <= config.MAX_MODEL_MARKET_DISAGREEMENT;
-    const shouldAcceptPrediction = prediction.confidence >= config.MIN_VALID_PREDICTION_CONFIDENCE && hasAcceptableDisagreement;
+    const hasValidEntryPrice = this.hasValidEntryPrice(prediction, predictionSnapshot);
+    const shouldAcceptPrediction = prediction.confidence >= config.MIN_VALID_PREDICTION_CONFIDENCE && hasAcceptableDisagreement && hasValidEntryPrice;
     return shouldAcceptPrediction;
   }
 
