@@ -119,7 +119,7 @@ Returns the latest one-shot live predictions already emitted for the currently a
 
 Behavior notes:
 
-- predictions are only evaluated while market progress stays inside `[MIN_OPPORTUNITY_PROGRESS, MAX_OPPORTUNITY_PROGRESS]`
+- predictions are only evaluated while market progress stays inside `[MIN_OPPORTUNITY_PROGRESS, MAX_OPPORTUNITY_PROGRESS]`, starting at `0.5` by default
 - reevaluation only happens when progress advances enough or when `UP/DOWN` prices move enough to justify another model inference
 - when a prediction is stored, it is marked either as an executed trade or as a shadow prediction
 - executed trades require all of the following:
@@ -362,7 +362,7 @@ All runtime defaults live in `src/config.ts`.
 - `config.MIN_VALID_ENTRY_PRICE`: minimum allowed chosen-side token price for a live prediction to be accepted.
 - `config.MAX_VALID_ENTRY_PRICE`: maximum allowed chosen-side token price for a live prediction to be accepted.
 - `config.MIN_VALID_PREDICTION_CONFIDENCE`: minimum confidence required for a live prediction to be persisted and for a resolved prediction to count toward dashboard result and hit rate.
-- `config.MIN_OPPORTUNITY_PROGRESS`: earliest market progress where live inference is allowed.
+- `config.MIN_OPPORTUNITY_PROGRESS`: earliest market progress where live inference is allowed. Default `0.5`.
 - `config.MAX_OPPORTUNITY_PROGRESS`: latest market progress where live inference is allowed.
 - `config.MIN_PROGRESS_DELTA_FOR_REEVAL`: minimum progress change required before reevaluating the same live market again.
 - `config.MIN_PRICE_DELTA_FOR_REEVAL`: minimum absolute `UP` or `DOWN` price change required before reevaluating the same live market again.

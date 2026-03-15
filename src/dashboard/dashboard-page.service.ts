@@ -104,7 +104,7 @@ export class DashboardPageService {
     const skipReason = card.latestPrediction?.isExecuted === false ? (card.latestPrediction.skipReason || "--").replaceAll("_", " ") : "--";
     const factMarkup = [
       this.renderFact("Result", resultValue, "Total USD result from buying 5 shares on each valid resolved prediction at the entry price."),
-      this.renderFact("Hit rate", hitRateValue, "Correct predictions as a share of resolved predictions."),
+      this.renderFact("Hit rate", hitRateValue, "Correct predictions over the rolling resolved-model window, including shadow predictions."),
       this.renderFact("Trade", tradeStatus, "Whether the latest prediction would have executed a trade or only remained as shadow history."),
       this.renderFact("Skip", skipReason, "Reason why the latest prediction stayed as shadow history instead of executing."),
       this.renderFact("Confidence", predictionConfidence, "Model confidence for the latest directional call."),

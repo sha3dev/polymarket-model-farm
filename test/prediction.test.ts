@@ -92,7 +92,7 @@ test("config defaults the live opportunity guards", () => {
   assert.equal(config.MIN_VALID_ENTRY_PRICE, 0.4);
   assert.equal(config.MAX_VALID_ENTRY_PRICE, 0.8);
   assert.equal(config.MIN_VALID_PREDICTION_CONFIDENCE, 0.75);
-  assert.equal(config.MIN_OPPORTUNITY_PROGRESS, 0.7);
+  assert.equal(config.MIN_OPPORTUNITY_PROGRESS, 0.5);
   assert.equal(config.MAX_OPPORTUNITY_PROGRESS, 0.92);
   assert.equal(config.MIN_PROGRESS_DELTA_FOR_REEVAL, 0.02);
   assert.equal(config.MIN_PRICE_DELTA_FOR_REEVAL, 0.03);

@@ -105,7 +105,7 @@ const renderCard = (card) => {
     renderFact("Live UP", liveUpPrice, "Current UP contract price from the latest collector snapshot."),
     renderFact("Live DOWN", liveDownPrice, "Current DOWN contract price from the latest collector snapshot."),
     renderFact("Result", resultValue, "Total USD result from buying 5 shares on each valid resolved prediction at the entry price."),
-    renderFact("Hit rate", hitRateValue, "Correct predictions as a share of resolved predictions."),
+    renderFact("Hit rate", hitRateValue, "Correct predictions over the rolling resolved-model window, including shadow predictions."),
     renderFact("Target", targetPrice, "Strike price the market must finish above or below."),
     renderFact("Trade", tradeStatus, "Whether the latest prediction would have executed a trade or only remained as shadow history."),
     renderFact("Skip", skipReason, "Reason why the latest prediction stayed as shadow history instead of executing."),

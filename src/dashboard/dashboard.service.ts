@@ -98,12 +98,13 @@ export class DashboardService {
     hitRatePercent: number | null;
     resultUsd: number | null;
   } {
+    const resolvedModelEntries = predictionHistory.filter((entry) => entry.actualDirection !== null);
+    const recentResolvedModelEntries = resolvedModelEntries.slice(0, config.HIT_RATE_MOVING_WINDOW_SIZE);
     const resolvedTradeEntries = predictionHistory.filter(
       (entry) => entry.actualDirection !== null && entry.isExecuted === true && entry.confidence >= config.MIN_VALID_PREDICTION_CONFIDENCE,
     );
-    const recentResolvedTradeEntries = resolvedTradeEntries.slice(0, config.HIT_RATE_MOVING_WINDOW_SIZE);
-    const resolvedPredictionCount = recentResolvedTradeEntries.length;
-    const correctPredictionCount = recentResolvedTradeEntries.filter((entry) => entry.isCorrect === true).length;
+    const resolvedPredictionCount = recentResolvedModelEntries.length;
+    const correctPredictionCount = recentResolvedModelEntries.filter((entry) => entry.isCorrect === true).length;
     const realizedUsd = resolvedTradeEntries.reduce((sum, entry) => {
       const entryPrice = entry.predictedDirection === "UP" ? entry.upPrice : entry.downPrice;
       const tradeResultUsd = entryPrice === null ? 0 : (entry.isCorrect === true ? 1 - entryPrice : -entryPrice) * 5;

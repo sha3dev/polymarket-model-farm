@@ -194,7 +194,7 @@ test("DashboardService renders the live dashboard with polling and compact histo
   assert.match(htmlDocument, />101\.25</);
   assert.match(htmlDocument, />0\.540</);
   assert.match(htmlDocument, />\+\$2\.30<\/strong>/);
-  assert.match(htmlDocument, />100%<\/strong>/);
+  assert.match(htmlDocument, />67%<\/strong>/);
   assert.match(htmlDocument, />Executed<\/strong>/);
   assert.match(htmlDocument, />--<\/strong>/);
   assert.match(htmlDocument, /data-history-button="btc-5m"/);
