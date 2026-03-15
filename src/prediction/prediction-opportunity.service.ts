@@ -37,6 +37,11 @@ export class PredictionOpportunityService {
     return priceBalance;
   }
 
+  private readRecentResolvedEntries(entries: PredictionHistoryEntry[]): PredictionHistoryEntry[] {
+    const recentResolvedEntries = entries.filter((entry) => entry.actualDirection !== null).slice(0, config.HIT_RATE_MOVING_WINDOW_SIZE);
+    return recentResolvedEntries;
+  }
+
   /**
    * @section public:methods
    */
@@ -112,7 +117,7 @@ export class PredictionOpportunityService {
   }
 
   public readHitRateSummary(entries: PredictionHistoryEntry[]): HitRateSummary {
-    const resolvedEntries = entries.filter((entry) => entry.actualDirection !== null);
+    const resolvedEntries = this.readRecentResolvedEntries(entries);
     const resolvedPredictionCount = resolvedEntries.length;
     const correctPredictionCount = resolvedEntries.filter((entry) => entry.isCorrect === true).length;
     const hitRatePercent = resolvedPredictionCount === 0 ? null : (correctPredictionCount / resolvedPredictionCount) * 100;

@@ -98,6 +98,7 @@ test("config defaults the live opportunity guards", () => {
   assert.equal(config.MIN_PRICE_DELTA_FOR_REEVAL, 0.03);
   assert.equal(config.MIN_PREDICTION_EDGE, 0.08);
   assert.equal(config.MIN_OPPORTUNITY_SCORE, 0.18);
+  assert.equal(config.HIT_RATE_MOVING_WINDOW_SIZE, 20);
   assert.equal(config.MIN_RESOLVED_PREDICTIONS_FOR_HIT_RATE_GATING, 20);
   assert.equal(config.MIN_VALID_HIT_RATE_FOR_EXECUTION, 75);
 });
@@ -246,6 +247,39 @@ test("LivePredictionService records an executed prediction once the slot clears 
   assert.equal(recordedEntries.length, 1);
   assert.equal(recordedEntries[0]?.isExecuted, true);
   assert.equal(recordedEntries[0]?.skipReason, null);
+});
+
+test("LivePredictionService uses the moving hit-rate window instead of full-history hit rate", async () => {
+  const recordedEntries: PredictionHistoryEntry[] = [];
+  const livePredictionService = new LivePredictionService({
+    collectorClientService: { loadState: async () => buildLivePredictionStatePayload(), loadMarketSnapshots: async () => buildLivePredictionMarketPayload() } as unknown as
+      LivePredictionServiceOptions["collectorClientService"],
+    predictionService: { buildPrediction: async () => buildPredictionItem() } as unknown as LivePredictionServiceOptions["predictionService"],
+    predictionHistoryService: {
+      getLatestPrediction: async () => null,
+      recordPrediction: async (_pair: { asset: string; window: string }, entry: PredictionHistoryEntry) => {
+        recordedEntries.push(entry);
+      },
+      loadHistory: async (pair: { asset: string; window: string }) => {
+        let entries: PredictionHistoryEntry[] = [];
+        if (pair.window === "5m" && pair.asset === "btc") {
+          entries = [...buildResolvedHistoryEntries("btc", "5m", 20, 10), ...buildResolvedHistoryEntries("btc", "5m", 20, 20, 100)];
+        }
+        if (pair.window === "5m" && pair.asset === "eth") {
+          entries = buildResolvedHistoryEntries("eth", "5m", 20, 12);
+        }
+        return { entries };
+      },
+      resolvePrediction: async () => {},
+    } as unknown as LivePredictionServiceOptions["predictionHistoryService"],
+    now: () => "2026-03-13T18:09:31.000Z",
+  });
+
+  await livePredictionService.refreshOnce();
+
+  assert.equal(recordedEntries.length, 1);
+  assert.equal(recordedEntries[0]?.isExecuted, false);
+  assert.equal(recordedEntries[0]?.skipReason, "low_hit_rate");
 });
 
 test("LivePredictionService keeps shadow predictions for low-hit-rate slots", async () => {
@@ -448,12 +482,12 @@ function buildMarketInput(options?: { upPrice?: number | null; downPrice?: numbe
   };
 }
 
-function buildResolvedHistoryEntries(asset: string, window: string, resolvedPredictionCount: number, correctPredictionCount: number): PredictionHistoryEntry[] {
+function buildResolvedHistoryEntries(asset: string, window: string, resolvedPredictionCount: number, correctPredictionCount: number, slugOffset = 0): PredictionHistoryEntry[] {
   const entries: PredictionHistoryEntry[] = [];
   for (let index = 0; index < resolvedPredictionCount; index += 1) {
     const isCorrect = index < correctPredictionCount;
     entries.push({
-      slug: `${asset}-${window}-${index}`,
+      slug: `${asset}-${window}-${slugOffset + index}`,
       asset: asset as PredictionHistoryEntry["asset"],
       window: window as PredictionHistoryEntry["window"],
       marketStart: "2026-03-13T18:05:00.000Z",

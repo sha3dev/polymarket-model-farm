@@ -131,6 +131,7 @@ Behavior notes:
   - the slot must already have at least `MIN_RESOLVED_PREDICTIONS_FOR_HIT_RATE_GATING` resolved predictions
   - after that, it must be a hit-rate leader for its window and also stay at or above `MIN_VALID_HIT_RATE_FOR_EXECUTION`
 - non-executed shadow predictions still remain in history so weaker models can keep updating their shadow hit rate without placing trades
+- hit rate is calculated on a rolling window of the most recent `HIT_RATE_MOVING_WINDOW_SIZE` resolved predictions, not on the full lifetime history
 - confidence is a blended probability in `[0, 1]` that combines the model view with the live market price when `UP/DOWN` prices exist
 - higher confidence means the final blended view is more favorable to the chosen side
 - confidence is calculated in six steps:
@@ -367,6 +368,7 @@ All runtime defaults live in `src/config.ts`.
 - `config.MIN_PRICE_DELTA_FOR_REEVAL`: minimum absolute `UP` or `DOWN` price change required before reevaluating the same live market again.
 - `config.MIN_PREDICTION_EDGE`: minimum `confidence - marketPrice` edge required for execution.
 - `config.MIN_OPPORTUNITY_SCORE`: minimum composite opportunity score required for execution.
+- `config.HIT_RATE_MOVING_WINDOW_SIZE`: rolling resolved-prediction window used for hit-rate calculations in execution gating and dashboard hit rate.
 - `config.MIN_RESOLVED_PREDICTIONS_FOR_HIT_RATE_GATING`: minimum resolved shadow-history sample size before a slot must become a hit-rate leader in its window to execute trades.
 - `config.MIN_VALID_HIT_RATE_FOR_EXECUTION`: minimum resolved hit rate required for a slot to execute trades once hit-rate gating becomes active.
 - `config.SHOULD_RECALCULATE_HISTORY_CONFIDENCE_ON_STARTUP`: when `true`, rewrites persisted history confidence values during startup using the current confidence formula.
