@@ -124,11 +124,10 @@ export class PredictionOpportunityService {
     const windowHitRates = SUPPORTED_ASSETS.map((asset: SupportedAsset) => hitRateMap.get(`${asset}-${pair.window}`) || { resolvedPredictionCount: 0, hitRatePercent: null });
     const eligibleWindowHitRates = windowHitRates.filter((summary) => summary.resolvedPredictionCount >= config.MIN_RESOLVED_PREDICTIONS_FOR_HIT_RATE_GATING && summary.hitRatePercent !== null);
     const bestWindowHitRate = eligibleWindowHitRates.reduce((best, summary) => Math.max(best, summary.hitRatePercent || 0), 0);
-    const hasWindowLeader = eligibleWindowHitRates.length > 0;
     const hasEnoughPairHistory = pairHitRate.resolvedPredictionCount >= config.MIN_RESOLVED_PREDICTIONS_FOR_HIT_RATE_GATING;
     const hasMinimumHitRate = (pairHitRate.hitRatePercent || 0) >= config.MIN_VALID_HIT_RATE_FOR_EXECUTION;
     const isWindowLeader = (pairHitRate.hitRatePercent || 0) >= bestWindowHitRate;
-    const shouldExecute = !hasWindowLeader || !hasEnoughPairHistory || (isWindowLeader && hasMinimumHitRate);
+    const shouldExecute = hasEnoughPairHistory && hasMinimumHitRate && isWindowLeader;
     const skipReason = shouldExecute ? null : "low_hit_rate";
     return { shouldExecute, skipReason };
   }

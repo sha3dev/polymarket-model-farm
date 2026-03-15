@@ -128,7 +128,8 @@ Behavior notes:
   - chosen-side entry price inside `[MIN_VALID_ENTRY_PRICE, MAX_VALID_ENTRY_PRICE]`
   - edge at least `MIN_PREDICTION_EDGE`
   - opportunity score at least `MIN_OPPORTUNITY_SCORE`
-  - once a slot has enough resolved history, it must be a hit-rate leader for its window and also stay at or above `MIN_VALID_HIT_RATE_FOR_EXECUTION`
+  - the slot must already have at least `MIN_RESOLVED_PREDICTIONS_FOR_HIT_RATE_GATING` resolved predictions
+  - after that, it must be a hit-rate leader for its window and also stay at or above `MIN_VALID_HIT_RATE_FOR_EXECUTION`
 - non-executed shadow predictions still remain in history so weaker models can keep updating their shadow hit rate without placing trades
 - confidence is a blended probability in `[0, 1]` that combines the model view with the live market price when `UP/DOWN` prices exist
 - higher confidence means the final blended view is more favorable to the chosen side

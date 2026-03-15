@@ -189,7 +189,7 @@ test("ModelRegistryService recompiles loaded models before training reuse", asyn
   assert.equal(compileCallCount, 1);
 });
 
-test("LivePredictionService records one executed prediction when the opportunity passes all guards", async () => {
+test("LivePredictionService keeps predictions in shadow until the slot has enough resolved history", async () => {
   const recordedEntries: PredictionHistoryEntry[] = [];
   const livePredictionService = new LivePredictionService({
     collectorClientService: { loadState: async () => buildLivePredictionStatePayload(), loadMarketSnapshots: async () => buildLivePredictionMarketPayload() } as unknown as
@@ -209,10 +209,43 @@ test("LivePredictionService records one executed prediction when the opportunity
   await livePredictionService.refreshOnce();
 
   assert.equal(recordedEntries.length, 1);
-  assert.equal(recordedEntries[0]?.isExecuted, true);
-  assert.equal(recordedEntries[0]?.skipReason, null);
+  assert.equal(recordedEntries[0]?.isExecuted, false);
+  assert.equal(recordedEntries[0]?.skipReason, "low_hit_rate");
   assert.equal(recordedEntries[0]?.confidence, 0.82);
   assert.equal(recordedEntries[0]?.downPrice, 0.52);
+});
+
+test("LivePredictionService records an executed prediction once the slot clears hit-rate gating", async () => {
+  const recordedEntries: PredictionHistoryEntry[] = [];
+  const livePredictionService = new LivePredictionService({
+    collectorClientService: { loadState: async () => buildLivePredictionStatePayload(), loadMarketSnapshots: async () => buildLivePredictionMarketPayload() } as unknown as
+      LivePredictionServiceOptions["collectorClientService"],
+    predictionService: { buildPrediction: async () => buildPredictionItem() } as unknown as LivePredictionServiceOptions["predictionService"],
+    predictionHistoryService: {
+      getLatestPrediction: async () => null,
+      recordPrediction: async (_pair: { asset: string; window: string }, entry: PredictionHistoryEntry) => {
+        recordedEntries.push(entry);
+      },
+      loadHistory: async (pair: { asset: string; window: string }) => {
+        let entries: PredictionHistoryEntry[] = [];
+        if (pair.window === "5m" && pair.asset === "btc") {
+          entries = buildResolvedHistoryEntries("btc", "5m", 20, 16);
+        }
+        if (pair.window === "5m" && pair.asset === "eth") {
+          entries = buildResolvedHistoryEntries("eth", "5m", 20, 12);
+        }
+        return { entries };
+      },
+      resolvePrediction: async () => {},
+    } as unknown as LivePredictionServiceOptions["predictionHistoryService"],
+    now: () => "2026-03-13T18:09:31.000Z",
+  });
+
+  await livePredictionService.refreshOnce();
+
+  assert.equal(recordedEntries.length, 1);
+  assert.equal(recordedEntries[0]?.isExecuted, true);
+  assert.equal(recordedEntries[0]?.skipReason, null);
 });
 
 test("LivePredictionService keeps shadow predictions for low-hit-rate slots", async () => {
