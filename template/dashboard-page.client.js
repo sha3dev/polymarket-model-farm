@@ -89,6 +89,8 @@ const renderCard = (card) => {
   const progressPercent = (card.progress * 100).toFixed(2);
   const predictionDirection = card.latestPrediction?.predictedDirection || "WAITING";
   const predictionConfidence = card.latestPrediction?.confidence.toFixed(2) || "--";
+  const tradeStatus = card.latestPrediction ? (card.latestPrediction.isExecuted ? "Executed" : "Shadow") : "--";
+  const skipReason = card.latestPrediction?.isExecuted === false ? (card.latestPrediction.skipReason || "--").replaceAll("_", " ") : "--";
   const liveUpPrice = card.liveUpPrice === null ? "--" : card.liveUpPrice.toFixed(3);
   const liveDownPrice = card.liveDownPrice === null ? "--" : card.liveDownPrice.toFixed(3);
   const predictedContractPrice = card.latestPrediction ? (card.latestPrediction.predictedDirection === "UP" ? card.latestPrediction.upPrice : card.latestPrediction.downPrice) : null;
@@ -105,7 +107,8 @@ const renderCard = (card) => {
     renderFact("Result", resultValue, "Total USD result from buying 5 shares on each valid resolved prediction at the entry price."),
     renderFact("Hit rate", hitRateValue, "Correct predictions as a share of resolved predictions."),
     renderFact("Target", targetPrice, "Strike price the market must finish above or below."),
-    renderFact("Snapshots", String(card.snapshotCount), "Snapshots ingested for the current live market."),
+    renderFact("Trade", tradeStatus, "Whether the latest prediction would have executed a trade or only remained as shadow history."),
+    renderFact("Skip", skipReason, "Reason why the latest prediction stayed as shadow history instead of executing."),
     renderFact("Confidence", predictionConfidence, "Model confidence for the latest directional call."),
     renderFact("Entry price", predictedContractPriceValue, "Polymarket contract price we would have bought following the predicted side."),
     renderFact("Trained", String(card.modelStatus.trainedMarketCount), "Closed markets already used for model training."),

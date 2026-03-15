@@ -78,7 +78,7 @@ export class PredictionHistoryService {
   }
 
   private normalizeEntry(entry: PredictionHistoryEntry): PredictionHistoryEntry {
-    const normalizedEntry = { ...entry, upPrice: entry.upPrice ?? null, downPrice: entry.downPrice ?? null };
+    const normalizedEntry = { ...entry, upPrice: entry.upPrice ?? null, downPrice: entry.downPrice ?? null, isExecuted: entry.isExecuted ?? true, skipReason: entry.skipReason ?? null };
     return normalizedEntry;
   }
 
@@ -101,7 +101,7 @@ export class PredictionHistoryService {
       marketUpProbability = this.clamp(entry.upPrice || 0, PredictionHistoryService.MIN_CONFIDENCE_PROBABILITY, 1 - PredictionHistoryService.MIN_CONFIDENCE_PROBABILITY);
     } else {
       if (hasDownPrice) {
-      marketUpProbability = this.clamp(1 - (entry.downPrice || 0), PredictionHistoryService.MIN_CONFIDENCE_PROBABILITY, 1 - PredictionHistoryService.MIN_CONFIDENCE_PROBABILITY);
+        marketUpProbability = this.clamp(1 - (entry.downPrice || 0), PredictionHistoryService.MIN_CONFIDENCE_PROBABILITY, 1 - PredictionHistoryService.MIN_CONFIDENCE_PROBABILITY);
       }
     }
     return marketUpProbability;

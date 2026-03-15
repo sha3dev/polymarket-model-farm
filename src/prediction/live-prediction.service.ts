@@ -11,6 +11,8 @@ import type { PredictionHistoryService } from "../history/index.ts";
 import type { PredictionHistoryEntry } from "../history/index.ts";
 import LOGGER from "../logger.ts";
 import type { PredictionFilter, PredictionItem } from "./index.ts";
+import { PredictionOpportunityService } from "./prediction-opportunity.service.ts";
+import type { EvaluationCheckpoint, HitRateSummary, PredictionDecision } from "./prediction-opportunity.types.ts";
 import type { PredictionService } from "./prediction.service.ts";
 
 /**
@@ -18,8 +20,6 @@ import type { PredictionService } from "./prediction.service.ts";
  */
 
 const RESOLUTION_RETRY_DELAY_MS = 30000;
-const PREDICTION_PROGRESS_STEPS = [...new Set(config.LIVE_PREDICTION_PROGRESS_STEPS)].sort((left, right) => left - right);
-const EARLIEST_PREDICTION_PROGRESS = Math.min(...PREDICTION_PROGRESS_STEPS);
 
 type LivePredictionServiceOptions = {
   collectorClientService: CollectorClientService;
@@ -36,7 +36,7 @@ type PendingResolutionEntry = {
 
 type MarketSnapshotPayload = Awaited<ReturnType<CollectorClientService["loadMarketSnapshots"]>>;
 
-type ThresholdPredictionAttempt = {
+type PredictionAttempt = {
   item: PredictionItem;
   snapshot: Snapshot;
 };
@@ -50,6 +50,8 @@ export class LivePredictionService {
 
   private readonly predictionService: PredictionService;
 
+  private readonly predictionOpportunityService: PredictionOpportunityService;
+
   private readonly predictionHistoryService: PredictionHistoryService;
 
   private readonly now: () => string;
@@ -62,7 +64,7 @@ export class LivePredictionService {
 
   private readonly pendingResolutionMap: Map<string, PendingResolutionEntry>;
 
-  private readonly attemptedPredictionThresholdMap: Map<string, number>;
+  private readonly evaluationCheckpointMap: Map<string, EvaluationCheckpoint>;
 
   private hasInitializedPendingResolutions: boolean;
 
@@ -73,13 +75,14 @@ export class LivePredictionService {
   public constructor(options: LivePredictionServiceOptions) {
     this.collectorClientService = options.collectorClientService;
     this.predictionService = options.predictionService;
+    this.predictionOpportunityService = PredictionOpportunityService.createDefault();
     this.predictionHistoryService = options.predictionHistoryService;
     this.now = options.now;
     this.loopTimer = null;
     this.isRunning = false;
     this.isRefreshing = false;
     this.pendingResolutionMap = new Map();
-    this.attemptedPredictionThresholdMap = new Map();
+    this.evaluationCheckpointMap = new Map();
     this.hasInitializedPendingResolutions = false;
   }
 
@@ -126,15 +129,23 @@ export class LivePredictionService {
     this.pendingResolutionMap.delete(`${pair.asset}-${pair.window}-${slug}`);
   }
 
-  private buildThresholdSnapshots(marketPayload: MarketSnapshotPayload, predictionThreshold: number): Snapshot[] {
-    const marketStartTs = Date.parse(marketPayload.marketStart);
-    const marketEndTs = Date.parse(marketPayload.marketEnd);
-    const predictionCutoffTs = marketStartTs + Math.max(marketEndTs - marketStartTs, 1) * predictionThreshold;
-    const thresholdSnapshots = marketPayload.snapshots.filter((snapshot) => snapshot.generatedAt <= predictionCutoffTs);
-    return thresholdSnapshots;
+  private shouldEvaluateMarket(pair: AssetWindow, marketState: CollectorStateMarket): boolean {
+    const progress = this.readProgress(marketState);
+    const pairSlugKey = this.predictionOpportunityService.buildPairSlugKey(pair, marketState.market?.slug || "");
+    const evaluationCheckpoint = this.evaluationCheckpointMap.get(pairSlugKey) || null;
+    const shouldEvaluateMarket = this.predictionOpportunityService.shouldEvaluateMarket(marketState, evaluationCheckpoint, progress);
+    return shouldEvaluateMarket;
   }
 
-  private async buildThresholdPrediction(market: NonNullable<CollectorStateMarket["market"]>, thresholdSnapshots: Snapshot[]): Promise<PredictionItem> {
+  private updateEvaluationCheckpoint(pair: AssetWindow, marketState: CollectorStateMarket): void {
+    const evaluationCheckpoint = this.predictionOpportunityService.buildEvaluationCheckpoint(marketState, this.readProgress(marketState));
+    if (evaluationCheckpoint) {
+      const pairSlugKey = this.predictionOpportunityService.buildPairSlugKey(pair, marketState.market?.slug || "");
+      this.evaluationCheckpointMap.set(pairSlugKey, evaluationCheckpoint);
+    }
+  }
+
+  private async buildMarketPrediction(market: NonNullable<CollectorStateMarket["market"]>, marketPayload: MarketSnapshotPayload): Promise<PredictionItem> {
     return await this.predictionService.buildPrediction({
       asset: market.asset,
       window: market.window,
@@ -143,52 +154,23 @@ export class LivePredictionService {
       marketEnd: market.marketEnd,
       priceToBeat: market.priceToBeat || 0,
       prevPriceToBeat: market.prevPriceToBeat || [],
-      snapshots: thresholdSnapshots,
+      snapshots: marketPayload.snapshots,
     });
   }
 
-  private readMarketSideProbability(snapshot: Snapshot, predictedDirection: PredictionItem["predictedDirection"]): number | null {
-    const marketSideProbability = predictedDirection === "UP" ? snapshot.upPrice : snapshot.downPrice;
-    return marketSideProbability;
-  }
-
-  private hasValidEntryPrice(prediction: PredictionItem, predictionSnapshot: Snapshot): boolean {
-    const entryPrice = this.readMarketSideProbability(predictionSnapshot, prediction.predictedDirection);
-    const hasValidEntryPrice = entryPrice !== null && entryPrice >= config.MIN_VALID_ENTRY_PRICE && entryPrice <= config.MAX_VALID_ENTRY_PRICE;
-    return hasValidEntryPrice;
-  }
-
-  private shouldAcceptPrediction(prediction: PredictionItem, predictionSnapshot: Snapshot): boolean {
-    const marketSideProbability = this.readMarketSideProbability(predictionSnapshot, prediction.predictedDirection);
-    const hasAcceptableDisagreement =
-      marketSideProbability === null || Math.abs(prediction.modelConfidence - marketSideProbability) <= config.MAX_MODEL_MARKET_DISAGREEMENT;
-    const hasValidEntryPrice = this.hasValidEntryPrice(prediction, predictionSnapshot);
-    const shouldAcceptPrediction = prediction.confidence >= config.MIN_VALID_PREDICTION_CONFIDENCE && hasAcceptableDisagreement && hasValidEntryPrice;
-    return shouldAcceptPrediction;
-  }
-
-  private async readThresholdPredictionAttempt(pair: AssetWindow, marketState: CollectorStateMarket, marketPayload: MarketSnapshotPayload): Promise<ThresholdPredictionAttempt | null> {
+  private async readPredictionAttempt(pair: AssetWindow, marketState: CollectorStateMarket, marketPayload: MarketSnapshotPayload): Promise<PredictionAttempt | null> {
     const market = marketState.market;
-    let thresholdPredictionAttempt: ThresholdPredictionAttempt | null = null;
+    let predictionAttempt: PredictionAttempt | null = null;
     if (market) {
-      const pairSlugKey = `${pair.asset}-${pair.window}-${market.slug}`;
-      const progress = this.readProgress(marketState);
-      const attemptedThreshold = this.attemptedPredictionThresholdMap.get(pairSlugKey) || 0;
-      const eligiblePredictionThresholds = PREDICTION_PROGRESS_STEPS.filter((predictionThreshold) => predictionThreshold > attemptedThreshold && progress >= predictionThreshold);
-      for (const predictionThreshold of eligiblePredictionThresholds) {
-        const thresholdSnapshots = this.buildThresholdSnapshots(marketPayload, predictionThreshold);
-        const predictionSnapshot = thresholdSnapshots[thresholdSnapshots.length - 1] || null;
-        if (predictionSnapshot) {
-          const prediction = await this.buildThresholdPrediction(market, thresholdSnapshots);
-          this.attemptedPredictionThresholdMap.set(pairSlugKey, predictionThreshold);
-          if (this.shouldAcceptPrediction(prediction, predictionSnapshot)) {
-            thresholdPredictionAttempt = { item: prediction, snapshot: predictionSnapshot };
-            break;
-          }
+      const predictionSnapshot = marketPayload.snapshots[marketPayload.snapshots.length - 1] || null;
+      if (predictionSnapshot) {
+        const prediction = await this.buildMarketPrediction(market, marketPayload);
+        if (this.predictionOpportunityService.shouldAcceptPrediction(prediction, predictionSnapshot)) {
+          predictionAttempt = { item: prediction, snapshot: predictionSnapshot };
         }
       }
     }
-    return thresholdPredictionAttempt;
+    return predictionAttempt;
   }
 
   private async initializePendingResolutions(): Promise<void> {
@@ -246,7 +228,24 @@ export class LivePredictionService {
     }
   }
 
-  private buildHistoryEntry(item: PredictionItem, marketState: CollectorStateMarket, predictionSnapshot: Snapshot): PredictionHistoryEntry {
+  private async readWindowHitRateMap(): Promise<Map<string, HitRateSummary>> {
+    const hitRateMap = new Map<string, HitRateSummary>();
+    for (const asset of SUPPORTED_ASSETS) {
+      for (const window of SUPPORTED_WINDOWS) {
+        const pair = { asset, window };
+        const history = await this.predictionHistoryService.loadHistory(pair);
+        hitRateMap.set(`${asset}-${window}`, this.predictionOpportunityService.readHitRateSummary(history.entries));
+      }
+    }
+    return hitRateMap;
+  }
+
+  private buildHistoryEntry(
+    item: PredictionItem,
+    marketState: CollectorStateMarket,
+    predictionSnapshot: Snapshot,
+    predictionDecision: PredictionDecision,
+  ): PredictionHistoryEntry {
     const market = marketState.market;
     if (!market) {
       throw new Error("market state is missing a live market");
@@ -266,6 +265,8 @@ export class LivePredictionService {
       confidence: item.confidence,
       predictedDirection: item.predictedDirection,
       modelVersion: item.modelVersion,
+      isExecuted: predictionDecision.shouldExecute,
+      skipReason: predictionDecision.skipReason,
       actualDelta: null,
       actualDirection: null,
       isCorrect: null,
@@ -275,7 +276,6 @@ export class LivePredictionService {
   private async recordMarketPrediction(pair: AssetWindow, historyEntry: PredictionHistoryEntry): Promise<void> {
     await this.predictionHistoryService.recordPrediction(pair, historyEntry);
     this.trackPendingResolution(pair, historyEntry);
-    this.attemptedPredictionThresholdMap.delete(`${pair.asset}-${pair.window}-${historyEntry.slug}`);
   }
 
   private async readCurrentPredictionItem(marketState: CollectorStateMarket): Promise<PredictionItem | null> {
@@ -304,18 +304,21 @@ export class LivePredictionService {
     return item;
   }
 
-  private async refreshMarketPrediction(marketState: CollectorStateMarket): Promise<void> {
+  private async refreshMarketPrediction(marketState: CollectorStateMarket, hitRateMap: Map<string, HitRateSummary>): Promise<void> {
     const market = marketState.market;
-    const progress = this.readProgress(marketState);
-    if (market && progress >= EARLIEST_PREDICTION_PROGRESS) {
+    if (market) {
       const pair = { asset: market.asset, window: market.window };
       const existingPrediction = await this.predictionHistoryService.getLatestPrediction(pair, market.slug);
-      if (!existingPrediction) {
+      const shouldEvaluateMarket = existingPrediction?.isExecuted === true ? false : this.shouldEvaluateMarket(pair, marketState);
+      if (shouldEvaluateMarket) {
         try {
           const marketPayload = await this.collectorClientService.loadMarketSnapshots(market.slug);
-          const thresholdPredictionAttempt = await this.readThresholdPredictionAttempt(pair, marketState, marketPayload);
-          if (thresholdPredictionAttempt) {
-            await this.recordMarketPrediction(pair, this.buildHistoryEntry(thresholdPredictionAttempt.item, marketState, thresholdPredictionAttempt.snapshot));
+          const predictionAttempt = await this.readPredictionAttempt(pair, marketState, marketPayload);
+          this.updateEvaluationCheckpoint(pair, marketState);
+          if (predictionAttempt) {
+            const predictionDecision = this.predictionOpportunityService.readPredictionDecision(pair, hitRateMap);
+            const historyEntry = this.buildHistoryEntry(predictionAttempt.item, marketState, predictionAttempt.snapshot, predictionDecision);
+            await this.recordMarketPrediction(pair, historyEntry);
           }
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
@@ -361,8 +364,9 @@ export class LivePredictionService {
       this.isRefreshing = true;
       try {
         const statePayload = await this.collectorClientService.loadState();
+        const hitRateMap = await this.readWindowHitRateMap();
         for (const marketState of statePayload.markets) {
-          await this.refreshMarketPrediction(marketState);
+          await this.refreshMarketPrediction(marketState, hitRateMap);
         }
         await this.resolveClosedPredictions();
       } finally {

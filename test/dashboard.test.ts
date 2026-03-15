@@ -103,6 +103,8 @@ test("DashboardService renders the live dashboard with polling and compact histo
         confidence: 0.91,
         predictedDirection: "UP",
         modelVersion: "model-btc-5m",
+        isExecuted: true,
+        skipReason: null,
         actualDelta: null,
         actualDirection: null,
         isCorrect: null,
@@ -124,6 +126,8 @@ test("DashboardService renders the live dashboard with polling and compact histo
             confidence: 0.91,
             predictedDirection: "UP",
             modelVersion: "model-btc-5m",
+            isExecuted: true,
+            skipReason: null,
             actualDelta: 0.01,
             actualDirection: "UP",
             isCorrect: true,
@@ -143,6 +147,8 @@ test("DashboardService renders the live dashboard with polling and compact histo
             confidence: 0.7,
             predictedDirection: "UP",
             modelVersion: "model-btc-5m",
+            isExecuted: true,
+            skipReason: null,
             actualDelta: -0.2,
             actualDirection: "DOWN",
             isCorrect: false,
@@ -162,6 +168,8 @@ test("DashboardService renders the live dashboard with polling and compact histo
             confidence: 0.55,
             predictedDirection: "UP",
             modelVersion: "model-btc-5m",
+            isExecuted: false,
+            skipReason: "low_confidence",
             actualDelta: 0.03,
             actualDirection: "UP",
             isCorrect: true,
@@ -187,6 +195,8 @@ test("DashboardService renders the live dashboard with polling and compact histo
   assert.match(htmlDocument, />0\.540</);
   assert.match(htmlDocument, />\+\$2\.30<\/strong>/);
   assert.match(htmlDocument, />100%<\/strong>/);
+  assert.match(htmlDocument, />Executed<\/strong>/);
+  assert.match(htmlDocument, />--<\/strong>/);
   assert.match(htmlDocument, /data-history-button="btc-5m"/);
   assert.match(htmlDocument, /id="history-modal"/);
   assert.match(htmlDocument, /<th>Entry price<\/th>/);
@@ -197,4 +207,5 @@ test("DashboardService renders the live dashboard with polling and compact histo
   assert.doesNotMatch(htmlDocument, />Updated<\/span>/);
   assert.doesNotMatch(htmlDocument, />UP price<\/span>/);
   assert.doesNotMatch(htmlDocument, />DOWN price<\/span>/);
+  assert.doesNotMatch(htmlDocument, />Snapshots<\/span>/);
 });

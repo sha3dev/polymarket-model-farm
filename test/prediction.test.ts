@@ -8,96 +8,128 @@ import config from "../src/config.ts";
 import { PredictionHistoryService } from "../src/history/index.ts";
 import type { PredictionHistoryEntry } from "../src/history/index.ts";
 import { ModelRegistryService } from "../src/model/index.ts";
-import type { PredictionMarketInput } from "../src/prediction/index.ts";
-import { LivePredictionService, PredictionService } from "../src/prediction/index.ts";
+import { LivePredictionService, PredictionOpportunityService, PredictionService } from "../src/prediction/index.ts";
+import type { PredictionItem, PredictionMarketInput } from "../src/prediction/index.ts";
 
-test("config defaults the confidence weights and disagreement guard", () => {
+type PredictionServiceOptions = ConstructorParameters<typeof PredictionService>[0];
+type LivePredictionServiceOptions = ConstructorParameters<typeof LivePredictionService>[0];
+type CollectorStatePayload = Awaited<ReturnType<LivePredictionServiceOptions["collectorClientService"]["loadState"]>>;
+type MarketSnapshotPayload = Awaited<ReturnType<LivePredictionServiceOptions["collectorClientService"]["loadMarketSnapshots"]>>;
+type MutableConfig = { SHOULD_RECALCULATE_HISTORY_CONFIDENCE_ON_STARTUP: boolean };
+
+const BASE_LIVE_SNAPSHOT = {
+  asset: "btc" as const,
+  window: "5m" as const,
+  marketId: null,
+  marketSlug: "btc-updown-5m-1773425100",
+  marketConditionId: null,
+  marketStart: "2026-03-13T18:05:00.000Z",
+  marketEnd: "2026-03-13T18:10:00.000Z",
+  priceToBeat: 71000,
+  upAssetId: null,
+  upPrice: null,
+  upOrderBook: null,
+  upEventTs: null,
+  downAssetId: null,
+  downPrice: null,
+  downOrderBook: null,
+  downEventTs: null,
+  binancePrice: null,
+  binanceOrderBook: null,
+  binanceEventTs: null,
+  coinbasePrice: null,
+  coinbaseOrderBook: null,
+  coinbaseEventTs: null,
+  krakenPrice: null,
+  krakenOrderBook: null,
+  krakenEventTs: null,
+  okxPrice: null,
+  okxOrderBook: null,
+  okxEventTs: null,
+  chainlinkPrice: null,
+  chainlinkOrderBook: null,
+  chainlinkEventTs: null,
+};
+
+const BASE_PREDICTION_SNAPSHOT = {
+  asset: "btc" as const,
+  window: "5m" as const,
+  marketId: null,
+  marketSlug: "btc-5m-test",
+  marketConditionId: null,
+  marketStart: "2026-03-13T00:00:00.000Z",
+  marketEnd: "2026-03-13T00:05:00.000Z",
+  priceToBeat: 100,
+  upAssetId: null,
+  upPrice: null,
+  upOrderBook: null,
+  upEventTs: null,
+  downAssetId: null,
+  downPrice: null,
+  downOrderBook: null,
+  downEventTs: null,
+  binancePrice: null,
+  binanceOrderBook: null,
+  binanceEventTs: null,
+  coinbasePrice: null,
+  coinbaseOrderBook: null,
+  coinbaseEventTs: null,
+  krakenPrice: null,
+  krakenOrderBook: null,
+  krakenEventTs: null,
+  okxPrice: null,
+  okxOrderBook: null,
+  okxEventTs: null,
+  chainlinkPrice: null,
+  chainlinkOrderBook: null,
+  chainlinkEventTs: null,
+};
+
+test("config defaults the live opportunity guards", () => {
   assert.equal(config.CONFIDENCE_MODEL_WEIGHT, 1);
   assert.equal(config.CONFIDENCE_MARKET_WEIGHT, 1);
   assert.equal(config.MAX_MODEL_MARKET_DISAGREEMENT, 0.25);
-  assert.deepEqual(config.LIVE_PREDICTION_PROGRESS_STEPS, [0.75, 0.9]);
   assert.equal(config.MIN_VALID_ENTRY_PRICE, 0.4);
   assert.equal(config.MAX_VALID_ENTRY_PRICE, 0.8);
   assert.equal(config.MIN_VALID_PREDICTION_CONFIDENCE, 0.75);
+  assert.equal(config.MIN_OPPORTUNITY_PROGRESS, 0.7);
+  assert.equal(config.MAX_OPPORTUNITY_PROGRESS, 0.92);
+  assert.equal(config.MIN_PROGRESS_DELTA_FOR_REEVAL, 0.02);
+  assert.equal(config.MIN_PRICE_DELTA_FOR_REEVAL, 0.03);
+  assert.equal(config.MIN_PREDICTION_EDGE, 0.08);
+  assert.equal(config.MIN_OPPORTUNITY_SCORE, 0.18);
+  assert.equal(config.MIN_RESOLVED_PREDICTIONS_FOR_HIT_RATE_GATING, 20);
+  assert.equal(config.MIN_VALID_HIT_RATE_FOR_EXECUTION, 75);
 });
 
-test("PredictionService converts model delta into directional confidence", async () => {
-  const predictionService = new PredictionService({
-    modelRegistryService: {
-      predict: async () => 0.5,
-      getPredictionContext: () => ({ metadata: null, trainedMarketCount: 120, modelVersion: "model-v1", hasCheckpoint: true, recentReferenceDelta: 0.004 }),
-    } as unknown as ConstructorParameters<typeof PredictionService>[0]["modelRegistryService"],
-    marketFeatureProjectorService: { projectSequence: () => ({ labels: ["progress"], rows: [[0.5]], maxSequenceLength: 600 }) } as unknown as ConstructorParameters<typeof PredictionService>[0]["marketFeatureProjectorService"],
-    now: () => "2026-03-13T00:00:00.000Z",
-  });
-
-  const prediction = await predictionService.buildPrediction(buildMarketInput());
-
-  assert.equal(prediction.predictedDirection, "UP");
-  assert.equal(prediction.snapshotCount, 2);
-  assert.ok(prediction.predictedDelta > 0);
-  assert.ok(prediction.modelConfidence >= 0);
-  assert.ok(prediction.modelConfidence <= 1);
-  assert.ok(prediction.confidence >= 0);
-  assert.ok(prediction.confidence <= 1);
-  assert.equal(prediction.modelVersion, "model-v1");
-});
-
-test("PredictionService does not collapse confidence around fifty percent when recent deltas are small", async () => {
-  const predictionService = new PredictionService({
-    modelRegistryService: {
-      predict: async () => 0.05,
-      getPredictionContext: () => ({ metadata: null, trainedMarketCount: 120, modelVersion: "model-v1", hasCheckpoint: true, recentReferenceDelta: 0.0005 }),
-    } as unknown as ConstructorParameters<typeof PredictionService>[0]["modelRegistryService"],
-    marketFeatureProjectorService: { projectSequence: () => ({ labels: ["progress"], rows: [[0.5]], maxSequenceLength: 600 }) } as unknown as ConstructorParameters<typeof PredictionService>[0]["marketFeatureProjectorService"],
-    now: () => "2026-03-13T00:00:00.000Z",
-  });
-
-  const prediction = await predictionService.buildPrediction(buildMarketInput({ upPrice: null, downPrice: null }));
-
-  assert.ok(prediction.confidence > 0.9);
-});
-
-test("PredictionService tempers model confidence when the market strongly prices the opposite side", async () => {
-  const predictionService = new PredictionService({
-    modelRegistryService: {
-      predict: async () => 0.05,
-      getPredictionContext: () => ({ metadata: null, trainedMarketCount: 120, modelVersion: "model-v1", hasCheckpoint: true, recentReferenceDelta: 0.0005 }),
-    } as unknown as ConstructorParameters<typeof PredictionService>[0]["modelRegistryService"],
-    marketFeatureProjectorService: { projectSequence: () => ({ labels: ["progress"], rows: [[0.5]], maxSequenceLength: 600 }) } as unknown as ConstructorParameters<typeof PredictionService>[0]["marketFeatureProjectorService"],
-    now: () => "2026-03-13T00:00:00.000Z",
-  });
+test("PredictionService builds a blended confidence instead of trusting the model alone", async () => {
+  const predictionService = buildPredictionService({ predict: async () => 0.05, recentReferenceDelta: 0.0005 });
 
   const prediction = await predictionService.buildPrediction(buildMarketInput({ upPrice: 0.1, downPrice: 0.9 }));
 
   assert.equal(prediction.predictedDirection, "UP");
-  assert.ok(prediction.confidence < prediction.modelConfidence);
+  assert.ok(prediction.predictedDelta > 0);
+  assert.ok(prediction.modelConfidence > prediction.confidence);
+  assert.ok(prediction.confidence > 0.5);
 });
 
-test("PredictionService rejects markets without historical price-to-beat", async () => {
-  const predictionService = new PredictionService({
-    modelRegistryService: {
-      predict: async () => 0,
-      getPredictionContext: () => ({ metadata: null, trainedMarketCount: 0, modelVersion: "model-v1", hasCheckpoint: true, recentReferenceDelta: 0 }),
-    } as unknown as ConstructorParameters<typeof PredictionService>[0]["modelRegistryService"],
-    marketFeatureProjectorService: { projectSequence: () => ({ labels: ["progress"], rows: [[0.1]], maxSequenceLength: 600 }) } as unknown as ConstructorParameters<typeof PredictionService>[0]["marketFeatureProjectorService"],
-    now: () => "2026-03-13T00:00:00.000Z",
-  });
+test("PredictionService rejects markets without enough training history or price-to-beat history", async () => {
+  const predictionService = buildPredictionService({ predict: async () => 0.2, recentReferenceDelta: 0.003, trainedMarketCount: 99 });
 
+  await assert.rejects(async () => predictionService.buildPrediction(buildMarketInput()), /at least 100 trained markets/);
   await assert.rejects(async () => predictionService.buildPrediction({ ...buildMarketInput(), prevPriceToBeat: [] }), /prevPriceToBeat/);
 });
 
-test("PredictionService rejects pairs with fewer than 100 trained markets", async () => {
-  const predictionService = new PredictionService({
-    modelRegistryService: {
-      predict: async () => 0.2,
-      getPredictionContext: () => ({ metadata: null, trainedMarketCount: 99, modelVersion: "model-v1", hasCheckpoint: true, recentReferenceDelta: 0.003 }),
-    } as unknown as ConstructorParameters<typeof PredictionService>[0]["modelRegistryService"],
-    marketFeatureProjectorService: { projectSequence: () => ({ labels: ["progress"], rows: [[0.5]], maxSequenceLength: 600 }) } as unknown as ConstructorParameters<typeof PredictionService>[0]["marketFeatureProjectorService"],
-    now: () => "2026-03-13T00:00:00.000Z",
-  });
+test("PredictionOpportunityService keeps only predictions that fit the market guards", () => {
+  const predictionOpportunityService = PredictionOpportunityService.createDefault();
+  const basePrediction = buildPredictionItem();
+  const validSnapshot = buildLivePredictionSnapshot("2026-03-13T18:09:30.000Z", 0.48, 0.52);
+  const disagreementPrediction = { ...basePrediction, modelConfidence: 0.95 };
+  const expensiveSnapshot = buildLivePredictionSnapshot("2026-03-13T18:09:30.000Z", 0.19, 0.81);
 
-  await assert.rejects(async () => predictionService.buildPrediction(buildMarketInput()), /at least 100 trained markets/);
+  assert.equal(predictionOpportunityService.shouldAcceptPrediction(basePrediction, validSnapshot), true);
+  assert.equal(predictionOpportunityService.shouldAcceptPrediction(disagreementPrediction, validSnapshot), false);
+  assert.equal(predictionOpportunityService.shouldAcceptPrediction(basePrediction, expensiveSnapshot), false);
 });
 
 test("ModelRegistryService recompiles loaded models before training reuse", async () => {
@@ -157,606 +189,213 @@ test("ModelRegistryService recompiles loaded models before training reuse", asyn
   assert.equal(compileCallCount, 1);
 });
 
+test("LivePredictionService records one executed prediction when the opportunity passes all guards", async () => {
+  const recordedEntries: PredictionHistoryEntry[] = [];
+  const livePredictionService = new LivePredictionService({
+    collectorClientService: { loadState: async () => buildLivePredictionStatePayload(), loadMarketSnapshots: async () => buildLivePredictionMarketPayload() } as unknown as
+      LivePredictionServiceOptions["collectorClientService"],
+    predictionService: { buildPrediction: async () => buildPredictionItem() } as unknown as LivePredictionServiceOptions["predictionService"],
+    predictionHistoryService: {
+      getLatestPrediction: async () => null,
+      recordPrediction: async (_pair: { asset: string; window: string }, entry: PredictionHistoryEntry) => {
+        recordedEntries.push(entry);
+      },
+      loadHistory: async () => ({ entries: [] }),
+      resolvePrediction: async () => {},
+    } as unknown as LivePredictionServiceOptions["predictionHistoryService"],
+    now: () => "2026-03-13T18:09:31.000Z",
+  });
+
+  await livePredictionService.refreshOnce();
+
+  assert.equal(recordedEntries.length, 1);
+  assert.equal(recordedEntries[0]?.isExecuted, true);
+  assert.equal(recordedEntries[0]?.skipReason, null);
+  assert.equal(recordedEntries[0]?.confidence, 0.82);
+  assert.equal(recordedEntries[0]?.downPrice, 0.52);
+});
+
+test("LivePredictionService keeps shadow predictions for low-hit-rate slots", async () => {
+  const recordedEntries: PredictionHistoryEntry[] = [];
+  const livePredictionService = new LivePredictionService({
+    collectorClientService: { loadState: async () => buildLivePredictionStatePayload(), loadMarketSnapshots: async () => buildLivePredictionMarketPayload() } as unknown as
+      LivePredictionServiceOptions["collectorClientService"],
+    predictionService: { buildPrediction: async () => buildPredictionItem() } as unknown as LivePredictionServiceOptions["predictionService"],
+    predictionHistoryService: {
+      getLatestPrediction: async () => null,
+      recordPrediction: async (_pair: { asset: string; window: string }, entry: PredictionHistoryEntry) => {
+        recordedEntries.push(entry);
+      },
+      loadHistory: async (pair: { asset: string; window: string }) => {
+        let entries: PredictionHistoryEntry[] = [];
+        if (pair.window === "5m" && pair.asset === "btc") {
+          entries = buildResolvedHistoryEntries("btc", "5m", 20, 8);
+        }
+        if (pair.window === "5m" && pair.asset === "eth") {
+          entries = buildResolvedHistoryEntries("eth", "5m", 20, 15);
+        }
+        return { entries };
+      },
+      resolvePrediction: async () => {},
+    } as unknown as LivePredictionServiceOptions["predictionHistoryService"],
+    now: () => "2026-03-13T18:09:31.000Z",
+  });
+
+  await livePredictionService.refreshOnce();
+
+  assert.equal(recordedEntries.length, 1);
+  assert.equal(recordedEntries[0]?.isExecuted, false);
+  assert.equal(recordedEntries[0]?.skipReason, "low_hit_rate");
+});
+
+test("LivePredictionService keeps shadow predictions when the slot leads its window but stays below 75% hit rate", async () => {
+  const recordedEntries: PredictionHistoryEntry[] = [];
+  const livePredictionService = new LivePredictionService({
+    collectorClientService: { loadState: async () => buildLivePredictionStatePayload(), loadMarketSnapshots: async () => buildLivePredictionMarketPayload() } as unknown as
+      LivePredictionServiceOptions["collectorClientService"],
+    predictionService: { buildPrediction: async () => buildPredictionItem() } as unknown as LivePredictionServiceOptions["predictionService"],
+    predictionHistoryService: {
+      getLatestPrediction: async () => null,
+      recordPrediction: async (_pair: { asset: string; window: string }, entry: PredictionHistoryEntry) => {
+        recordedEntries.push(entry);
+      },
+      loadHistory: async (pair: { asset: string; window: string }) => {
+        let entries: PredictionHistoryEntry[] = [];
+        if (pair.window === "5m" && pair.asset === "btc") {
+          entries = buildResolvedHistoryEntries("btc", "5m", 20, 14);
+        }
+        if (pair.window === "5m" && pair.asset === "eth") {
+          entries = buildResolvedHistoryEntries("eth", "5m", 20, 12);
+        }
+        return { entries };
+      },
+      resolvePrediction: async () => {},
+    } as unknown as LivePredictionServiceOptions["predictionHistoryService"],
+    now: () => "2026-03-13T18:09:31.000Z",
+  });
+
+  await livePredictionService.refreshOnce();
+
+  assert.equal(recordedEntries.length, 1);
+  assert.equal(recordedEntries[0]?.isExecuted, false);
+  assert.equal(recordedEntries[0]?.skipReason, "low_hit_rate");
+});
+
+test("LivePredictionService avoids repeated inference when the live market barely changes", async () => {
+  let buildPredictionCallCount = 0;
+  let latestGeneratedAtIso = "2026-03-13T18:09:30.000Z";
+  const livePredictionService = new LivePredictionService({
+    collectorClientService: {
+      loadState: async () => buildLivePredictionStatePayload(latestGeneratedAtIso, 0.48, 0.52),
+      loadMarketSnapshots: async () => buildLivePredictionMarketPayload(latestGeneratedAtIso, 0.48, 0.52),
+    } as unknown as LivePredictionServiceOptions["collectorClientService"],
+    predictionService: { buildPrediction: async () => recordPredictionCall(buildPredictionCallCount += 1) } as unknown as LivePredictionServiceOptions["predictionService"],
+    predictionHistoryService: { getLatestPrediction: async () => null, recordPrediction: async () => {}, loadHistory: async () => ({ entries: [] }), resolvePrediction: async () => {} } as unknown as
+      LivePredictionServiceOptions["predictionHistoryService"],
+    now: () => "2026-03-13T18:09:31.000Z",
+  });
+
+  await livePredictionService.refreshOnce();
+  latestGeneratedAtIso = "2026-03-13T18:09:35.000Z";
+  await livePredictionService.refreshOnce();
+
+  assert.equal(buildPredictionCallCount, 1);
+});
+
 test("LivePredictionService resolves closed predictions from final up/down prices", async () => {
-  const resolvedPredictions: Array<{ slug: string; actualDelta: number }> = [];
+  const resolvedEntries: Array<{ slug: string; actualDelta: number }> = [];
   const livePredictionService = new LivePredictionService({
     collectorClientService: {
       loadState: async () => ({ generatedAt: "2026-03-13T18:10:30.000Z", markets: [] }),
-      loadMarketSnapshots: async () => ({
-        slug: "btc-updown-5m-1773425100",
-        asset: "btc",
-        window: "5m",
-        marketStart: "2026-03-13T18:05:00.000Z",
-        marketEnd: "2026-03-13T18:10:00.000Z",
-        snapshots: [
-          {
-            asset: "btc",
-            window: "5m",
-            generatedAt: Date.parse("2026-03-13T18:10:00.000Z"),
-            marketId: null,
-            marketSlug: "btc-updown-5m-1773425100",
-            marketConditionId: null,
-            marketStart: "2026-03-13T18:05:00.000Z",
-            marketEnd: "2026-03-13T18:10:00.000Z",
-            priceToBeat: 71000,
-            upAssetId: null,
-            upPrice: 0.73,
-            upOrderBook: null,
-            upEventTs: null,
-            downAssetId: null,
-            downPrice: 0.21,
-            downOrderBook: null,
-            downEventTs: null,
-            binancePrice: null,
-            binanceOrderBook: null,
-            binanceEventTs: null,
-            coinbasePrice: null,
-            coinbaseOrderBook: null,
-            coinbaseEventTs: null,
-            krakenPrice: null,
-            krakenOrderBook: null,
-            krakenEventTs: null,
-            okxPrice: null,
-            okxOrderBook: null,
-            okxEventTs: null,
-            chainlinkPrice: null,
-            chainlinkOrderBook: null,
-            chainlinkEventTs: null,
-          },
-        ],
-      }),
-    } as unknown as ConstructorParameters<typeof LivePredictionService>[0]["collectorClientService"],
-    predictionService: { buildPrediction: async () => { throw new Error("not expected"); } } as unknown as ConstructorParameters<typeof LivePredictionService>[0]["predictionService"],
-    predictionHistoryService: {
-      getLatestPrediction: async () => null,
-      recordPrediction: async () => {},
-      loadHistory: async (pair: { asset: string; window: string }) =>
-        pair.asset === "btc" && pair.window === "5m"
-          ? {
-              entries: [
-                {
-                  slug: "btc-updown-5m-1773425100",
-                  asset: "btc",
-                  window: "5m",
-                  marketStart: "2026-03-13T18:05:00.000Z",
-                  marketEnd: "2026-03-13T18:10:00.000Z",
-                  predictionMadeAt: "2026-03-13T18:08:51.626Z",
-                  progressWhenPredicted: 0.76,
-                  observedPrice: 71038.28,
-                  upPrice: 0.3,
-                  downPrice: 0.71,
-                  predictedDelta: 0.0005,
-                  confidence: 0.72,
-                  predictedDirection: "UP",
-                  modelVersion: "btc-5m-2026-03-13T18:07:48.948Z",
-                  actualDelta: null,
-                  actualDirection: null,
-                  isCorrect: null,
-                },
-              ],
-            }
-          : { entries: [] },
-      resolvePrediction: async (_pair: { asset: string; window: string }, slug: string, actualDelta: number) => {
-        resolvedPredictions.push({ slug, actualDelta });
-      },
-    } as unknown as ConstructorParameters<typeof LivePredictionService>[0]["predictionHistoryService"],
-    now: () => "2026-03-13T18:10:30.000Z",
-  });
-
-  await livePredictionService.refreshOnce();
-
-  assert.deepEqual(resolvedPredictions, [{ slug: "btc-updown-5m-1773425100", actualDelta: 0.52 }]);
-});
-
-test("LivePredictionService records the first threshold that clears confidence", async () => {
-  const recordedPredictions: Array<Pick<PredictionHistoryEntry, "progressWhenPredicted" | "upPrice" | "downPrice" | "confidence">> = [];
-  const livePredictionService = new LivePredictionService({
-    collectorClientService: { loadState: async () => buildLivePredictionStatePayload(), loadMarketSnapshots: async () => buildLivePredictionMarketPayload() } as unknown as ConstructorParameters<
-      typeof LivePredictionService
-    >[0]["collectorClientService"],
-    predictionService: {
-      buildPrediction: async (market: PredictionMarketInput) => {
-        const latestSnapshot = market.snapshots[market.snapshots.length - 1];
-        if (latestSnapshot?.generatedAt === Date.parse("2026-03-13T18:07:30.000Z")) {
-          return {
-            slug: market.slug,
-            asset: market.asset,
-            window: market.window,
-            snapshotCount: market.snapshots.length,
-            progress: 0.5,
-            modelConfidence: 0.55,
-            confidence: 0.55,
-            predictedDelta: 0.01,
-            predictedDirection: "UP",
-            observedPrice: 71010,
-            modelVersion: "model-v1",
-            trainedMarketCount: 200,
-            generatedAt: "2026-03-13T18:07:30.000Z",
-          };
-        }
-        return {
-          slug: market.slug,
-          asset: market.asset,
-          window: market.window,
-          snapshotCount: market.snapshots.length,
-          progress: 0.75,
-          modelConfidence: 0.82,
-          confidence: 0.82,
-          predictedDelta: -0.01,
-          predictedDirection: "DOWN",
-          observedPrice: 70990,
-          modelVersion: "model-v1",
-          trainedMarketCount: 200,
-          generatedAt: "2026-03-13T18:08:45.000Z",
-        };
-      },
-    } as unknown as ConstructorParameters<typeof LivePredictionService>[0]["predictionService"],
-    predictionHistoryService: {
-      getLatestPrediction: async () => null,
-      recordPrediction: async (
-        _pair: { asset: string; window: string },
-        entry: PredictionHistoryEntry,
-      ) => {
-        recordedPredictions.push({ progressWhenPredicted: entry.progressWhenPredicted, upPrice: entry.upPrice, downPrice: entry.downPrice, confidence: entry.confidence });
-      },
-      loadHistory: async () => ({ entries: [] }),
-      resolvePrediction: async () => {},
-    } as unknown as ConstructorParameters<typeof LivePredictionService>[0]["predictionHistoryService"],
-    now: () => "2026-03-13T18:09:31.000Z",
-  });
-
-  await livePredictionService.refreshOnce();
-
-  assert.deepEqual(recordedPredictions, [{ progressWhenPredicted: 0.75, upPrice: 0.27, downPrice: 0.73, confidence: 0.82 }]);
-});
-
-test("LivePredictionService rejects a prediction when model-market disagreement is too large", async () => {
-  const recordedPredictions: PredictionHistoryEntry[] = [];
-  const livePredictionService = new LivePredictionService({
-    collectorClientService: { loadState: async () => buildLivePredictionStatePayload(), loadMarketSnapshots: async () => buildLivePredictionMarketPayload() } as unknown as ConstructorParameters<
-      typeof LivePredictionService
-    >[0]["collectorClientService"],
-    predictionService: {
-      buildPrediction: async (market: PredictionMarketInput) => {
-        const latestSnapshot = market.snapshots[market.snapshots.length - 1];
-        if (latestSnapshot?.generatedAt === Date.parse("2026-03-13T18:07:30.000Z")) {
-          return {
-            slug: market.slug,
-            asset: market.asset,
-            window: market.window,
-            snapshotCount: market.snapshots.length,
-            progress: 0.5,
-            modelConfidence: 0.95,
-            confidence: 0.82,
-            predictedDelta: 0.01,
-            predictedDirection: "UP",
-            observedPrice: 71010,
-            modelVersion: "model-v1",
-            trainedMarketCount: 200,
-            generatedAt: "2026-03-13T18:07:30.000Z",
-          };
-        }
-        return {
-          slug: market.slug,
-          asset: market.asset,
-          window: market.window,
-          snapshotCount: market.snapshots.length,
-          progress: 0.75,
-          modelConfidence: 0.82,
-          confidence: 0.82,
-          predictedDelta: -0.01,
-          predictedDirection: "DOWN",
-          observedPrice: 70990,
-          modelVersion: "model-v1",
-          trainedMarketCount: 200,
-          generatedAt: "2026-03-13T18:08:45.000Z",
-        };
-      },
-    } as unknown as ConstructorParameters<typeof LivePredictionService>[0]["predictionService"],
-    predictionHistoryService: {
-      getLatestPrediction: async () => null,
-      recordPrediction: async (_pair: { asset: string; window: string }, entry: PredictionHistoryEntry) => {
-        recordedPredictions.push(entry);
-      },
-      loadHistory: async () => ({ entries: [] }),
-      resolvePrediction: async () => {},
-    } as unknown as ConstructorParameters<typeof LivePredictionService>[0]["predictionHistoryService"],
-    now: () => "2026-03-13T18:09:31.000Z",
-  });
-
-  await livePredictionService.refreshOnce();
-
-  assert.equal(recordedPredictions.length, 1);
-  assert.equal(recordedPredictions[0]?.predictedDirection, "DOWN");
-  assert.equal(recordedPredictions[0]?.progressWhenPredicted, 0.75);
-});
-
-test("LivePredictionService rejects a prediction when the entry price is outside the valid range", async () => {
-  const recordedPredictions: PredictionHistoryEntry[] = [];
-  const livePredictionService = new LivePredictionService({
-    collectorClientService: {
-      loadState: async () => buildLivePredictionStatePayload(),
-      loadMarketSnapshots: async () => ({
-        slug: "btc-updown-5m-1773425100",
-        asset: "btc",
-        window: "5m",
-        marketStart: "2026-03-13T18:05:00.000Z",
-        marketEnd: "2026-03-13T18:10:00.000Z",
-        snapshots: [buildLivePredictionSnapshot("2026-03-13T18:08:45.000Z", 0.19, 0.81), buildLivePredictionSnapshot("2026-03-13T18:09:30.000Z", 0.12, 0.88)],
-      }),
-    } as unknown as ConstructorParameters<typeof LivePredictionService>[0]["collectorClientService"],
-    predictionService: {
-      buildPrediction: async (market: PredictionMarketInput) => ({
-        slug: market.slug,
-        asset: market.asset,
-        window: market.window,
-        snapshotCount: market.snapshots.length,
-        progress: 0.75,
-        modelConfidence: 0.74,
-        confidence: 0.74,
-        predictedDelta: -0.01,
-        predictedDirection: "DOWN",
-        observedPrice: 70990,
-        modelVersion: "model-v1",
-        trainedMarketCount: 200,
-        generatedAt: "2026-03-13T18:08:45.000Z",
-      }),
-    } as unknown as ConstructorParameters<typeof LivePredictionService>[0]["predictionService"],
-    predictionHistoryService: {
-      getLatestPrediction: async () => null,
-      recordPrediction: async (_pair: { asset: string; window: string }, entry: PredictionHistoryEntry) => {
-        recordedPredictions.push(entry);
-      },
-      loadHistory: async () => ({ entries: [] }),
-      resolvePrediction: async () => {},
-    } as unknown as ConstructorParameters<typeof LivePredictionService>[0]["predictionHistoryService"],
-    now: () => "2026-03-13T18:09:31.000Z",
-  });
-
-  await livePredictionService.refreshOnce();
-
-  assert.equal(recordedPredictions.length, 0);
-});
-
-test("LivePredictionService initializes unresolved history only once across refresh cycles", async () => {
-  let loadHistoryCallCount = 0;
-  let loadMarketSnapshotsCallCount = 0;
-  const resolvedPredictions: Array<{ slug: string; actualDelta: number }> = [];
-  const livePredictionService = new LivePredictionService({
-    collectorClientService: {
-      loadState: async () => ({ generatedAt: "2026-03-13T18:10:30.000Z", markets: [] }),
-      loadMarketSnapshots: async () => {
-        loadMarketSnapshotsCallCount += 1;
-        return {
-          slug: "btc-updown-5m-1773425100",
-          asset: "btc",
-          window: "5m",
-          marketStart: "2026-03-13T18:05:00.000Z",
-          marketEnd: "2026-03-13T18:10:00.000Z",
-          snapshots: [
-            {
-              asset: "btc",
-              window: "5m",
-              generatedAt: Date.parse("2026-03-13T18:10:00.000Z"),
-              marketId: null,
-              marketSlug: "btc-updown-5m-1773425100",
-              marketConditionId: null,
-              marketStart: "2026-03-13T18:05:00.000Z",
-              marketEnd: "2026-03-13T18:10:00.000Z",
-              priceToBeat: 71000,
-              upAssetId: null,
-              upPrice: 0.73,
-              upOrderBook: null,
-              upEventTs: null,
-              downAssetId: null,
-              downPrice: 0.21,
-              downOrderBook: null,
-              downEventTs: null,
-              binancePrice: null,
-              binanceOrderBook: null,
-              binanceEventTs: null,
-              coinbasePrice: null,
-              coinbaseOrderBook: null,
-              coinbaseEventTs: null,
-              krakenPrice: null,
-              krakenOrderBook: null,
-              krakenEventTs: null,
-              okxPrice: null,
-              okxOrderBook: null,
-              okxEventTs: null,
-              chainlinkPrice: null,
-              chainlinkOrderBook: null,
-              chainlinkEventTs: null,
-            },
-          ],
-        };
-      },
-    } as unknown as ConstructorParameters<typeof LivePredictionService>[0]["collectorClientService"],
-    predictionService: { buildPrediction: async () => { throw new Error("not expected"); } } as unknown as ConstructorParameters<typeof LivePredictionService>[0]["predictionService"],
+      loadMarketSnapshots: async () => buildResolutionMarketPayload(0.73, 0.21),
+    } as unknown as LivePredictionServiceOptions["collectorClientService"],
+    predictionService: { buildPrediction: async () => { throw new Error("not expected"); } } as unknown as LivePredictionServiceOptions["predictionService"],
     predictionHistoryService: {
       getLatestPrediction: async () => null,
       recordPrediction: async () => {},
       loadHistory: async (pair: { asset: string; window: string }) => {
-        loadHistoryCallCount += 1;
-        return pair.asset === "btc" && pair.window === "5m"
-          ? {
-              entries: [
-                {
-                  slug: "btc-updown-5m-1773425100",
-                  asset: "btc",
-                  window: "5m",
-                  marketStart: "2026-03-13T18:05:00.000Z",
-                  marketEnd: "2026-03-13T18:10:00.000Z",
-                  predictionMadeAt: "2026-03-13T18:08:51.626Z",
-                  progressWhenPredicted: 0.76,
-                  observedPrice: 71038.28,
-                  upPrice: 0.3,
-                  downPrice: 0.71,
-                  predictedDelta: 0.0005,
-                  confidence: 0.72,
-                  predictedDirection: "UP",
-                  modelVersion: "btc-5m-2026-03-13T18:07:48.948Z",
-                  actualDelta: null,
-                  actualDirection: null,
-                  isCorrect: null,
-                },
-              ],
-            }
-          : { entries: [] };
+        const entries = pair.asset === "btc" && pair.window === "5m" ? [buildUnresolvedHistoryEntry()] : [];
+        return { entries };
       },
       resolvePrediction: async (_pair: { asset: string; window: string }, slug: string, actualDelta: number) => {
-        resolvedPredictions.push({ slug, actualDelta });
+        resolvedEntries.push({ slug, actualDelta });
       },
-    } as unknown as ConstructorParameters<typeof LivePredictionService>[0]["predictionHistoryService"],
+    } as unknown as LivePredictionServiceOptions["predictionHistoryService"],
     now: () => "2026-03-13T18:10:30.000Z",
   });
 
   await livePredictionService.refreshOnce();
-  await livePredictionService.refreshOnce();
 
-  assert.equal(loadHistoryCallCount, 8);
-  assert.equal(loadMarketSnapshotsCallCount, 1);
-  assert.deepEqual(resolvedPredictions, [{ slug: "btc-updown-5m-1773425100", actualDelta: 0.52 }]);
+  assert.deepEqual(resolvedEntries, [{ slug: "btc-updown-5m-1773425100", actualDelta: 0.52 }]);
 });
 
-test("LivePredictionService backs off collector retries for unresolved closed markets", async () => {
-  let currentIso = "2026-03-13T18:10:30.000Z";
-  let loadMarketSnapshotsCallCount = 0;
-  const livePredictionService = new LivePredictionService({
-    collectorClientService: {
-      loadState: async () => ({ generatedAt: currentIso, markets: [] }),
-      loadMarketSnapshots: async () => {
-        loadMarketSnapshotsCallCount += 1;
-        return {
-          slug: "btc-updown-5m-1773425100",
-          asset: "btc",
-          window: "5m",
-          marketStart: "2026-03-13T18:05:00.000Z",
-          marketEnd: "2026-03-13T18:10:00.000Z",
-          snapshots: [
-            {
-              asset: "btc",
-              window: "5m",
-              generatedAt: Date.parse("2026-03-13T18:10:00.000Z"),
-              marketId: null,
-              marketSlug: "btc-updown-5m-1773425100",
-              marketConditionId: null,
-              marketStart: "2026-03-13T18:05:00.000Z",
-              marketEnd: "2026-03-13T18:10:00.000Z",
-              priceToBeat: 71000,
-              upAssetId: null,
-              upPrice: null,
-              upOrderBook: null,
-              upEventTs: null,
-              downAssetId: null,
-              downPrice: null,
-              downOrderBook: null,
-              downEventTs: null,
-              binancePrice: null,
-              binanceOrderBook: null,
-              binanceEventTs: null,
-              coinbasePrice: null,
-              coinbaseOrderBook: null,
-              coinbaseEventTs: null,
-              krakenPrice: null,
-              krakenOrderBook: null,
-              krakenEventTs: null,
-              okxPrice: null,
-              okxOrderBook: null,
-              okxEventTs: null,
-              chainlinkPrice: null,
-              chainlinkOrderBook: null,
-              chainlinkEventTs: null,
-            },
-          ],
-        };
-      },
-    } as unknown as ConstructorParameters<typeof LivePredictionService>[0]["collectorClientService"],
-    predictionService: { buildPrediction: async () => { throw new Error("not expected"); } } as unknown as ConstructorParameters<typeof LivePredictionService>[0]["predictionService"],
-    predictionHistoryService: {
-      getLatestPrediction: async () => null,
-      recordPrediction: async () => {},
-      loadHistory: async (pair: { asset: string; window: string }) =>
-        pair.asset === "btc" && pair.window === "5m"
-          ? {
-              entries: [
-                {
-                  slug: "btc-updown-5m-1773425100",
-                  asset: "btc",
-                  window: "5m",
-                  marketStart: "2026-03-13T18:05:00.000Z",
-                  marketEnd: "2026-03-13T18:10:00.000Z",
-                  predictionMadeAt: "2026-03-13T18:08:51.626Z",
-                  progressWhenPredicted: 0.76,
-                  observedPrice: 71038.28,
-                  upPrice: 0.3,
-                  downPrice: 0.71,
-                  predictedDelta: 0.0005,
-                  confidence: 0.72,
-                  predictedDirection: "UP",
-                  modelVersion: "btc-5m-2026-03-13T18:07:48.948Z",
-                  actualDelta: null,
-                  actualDirection: null,
-                  isCorrect: null,
-                },
-              ],
-            }
-          : { entries: [] },
-      resolvePrediction: async () => {},
-    } as unknown as ConstructorParameters<typeof LivePredictionService>[0]["predictionHistoryService"],
-    now: () => currentIso,
-  });
-
-  await livePredictionService.refreshOnce();
-  await livePredictionService.refreshOnce();
-  currentIso = "2026-03-13T18:11:01.000Z";
-  await livePredictionService.refreshOnce();
-
-  assert.equal(loadMarketSnapshotsCallCount, 2);
-});
-
-test("PredictionHistoryService recalculates stored confidence values during initialization", async () => {
-  const storageDirectoryPath = await fs.mkdtemp(path.join(os.tmpdir(), "prediction-history-test-"));
+test("PredictionHistoryService recalculates stored confidence when enabled and leaves it intact when disabled", async () => {
+  const enabledDirectoryPath = await fs.mkdtemp(path.join(os.tmpdir(), "prediction-history-enabled-"));
+  const disabledDirectoryPath = await fs.mkdtemp(path.join(os.tmpdir(), "prediction-history-disabled-"));
+  await writeHistoryFixture(enabledDirectoryPath, 0.01);
+  await writeHistoryFixture(disabledDirectoryPath, 0.01);
   const previousToggle = config.SHOULD_RECALCULATE_HISTORY_CONFIDENCE_ON_STARTUP;
-  const predictionHistoryService = new PredictionHistoryService({ storageDirectoryPath, referenceDeltaReader: () => 0.04 });
-  await fs.writeFile(
-    path.join(storageDirectoryPath, "btc-5m.json"),
-    JSON.stringify({
-      entries: [
-        {
-          slug: "btc-updown-5m-1773425100",
-          asset: "btc",
-          window: "5m",
-          marketStart: "2026-03-13T18:05:00.000Z",
-          marketEnd: "2026-03-13T18:10:00.000Z",
-          predictionMadeAt: "2026-03-13T18:08:51.626Z",
-          progressWhenPredicted: 0.76,
-          observedPrice: 71038.28,
-          upPrice: 0.3,
-          downPrice: 0.71,
-          predictedDelta: 0.02,
-          confidence: 0.01,
-          predictedDirection: "UP",
-          modelVersion: "btc-5m-2026-03-13T18:07:48.948Z",
-          actualDelta: null,
-          actualDirection: null,
-          isCorrect: null,
-        },
-      ],
-    }),
-    "utf8",
-  );
-
-  (config as { SHOULD_RECALCULATE_HISTORY_CONFIDENCE_ON_STARTUP: boolean }).SHOULD_RECALCULATE_HISTORY_CONFIDENCE_ON_STARTUP = true;
 
   try {
-    await predictionHistoryService.initialize();
+    (config as MutableConfig).SHOULD_RECALCULATE_HISTORY_CONFIDENCE_ON_STARTUP = true;
+    const enabledService = new PredictionHistoryService({ storageDirectoryPath: enabledDirectoryPath, referenceDeltaReader: () => 0.04 });
+    await enabledService.initialize();
+
+    (config as MutableConfig).SHOULD_RECALCULATE_HISTORY_CONFIDENCE_ON_STARTUP = false;
+    const disabledService = new PredictionHistoryService({ storageDirectoryPath: disabledDirectoryPath, referenceDeltaReader: () => 0.04 });
+    await disabledService.initialize();
+
+    const enabledHistory = await enabledService.loadHistory({ asset: "btc", window: "5m" });
+    const disabledHistory = await disabledService.loadHistory({ asset: "btc", window: "5m" });
+
+    assert.ok((enabledHistory.entries[0]?.confidence || 0) > 0.01);
+    assert.equal(disabledHistory.entries[0]?.confidence, 0.01);
   } finally {
-    (config as { SHOULD_RECALCULATE_HISTORY_CONFIDENCE_ON_STARTUP: boolean }).SHOULD_RECALCULATE_HISTORY_CONFIDENCE_ON_STARTUP = previousToggle;
+    (config as MutableConfig).SHOULD_RECALCULATE_HISTORY_CONFIDENCE_ON_STARTUP = previousToggle;
   }
-
-  const history = await predictionHistoryService.loadHistory({ asset: "btc", window: "5m" });
-  const modelLogit = 0.02 / (0.04 * config.CONFIDENCE_DELTA_FACTOR);
-  const modelProbability = 1 / (1 + Math.exp(-modelLogit));
-  const marketLogit = Math.log(0.3 / 0.7);
-  const blendedLogit = Math.log(modelProbability / (1 - modelProbability)) * config.CONFIDENCE_MODEL_WEIGHT + marketLogit * config.CONFIDENCE_MARKET_WEIGHT;
-  const expectedConfidence = 1 / (1 + Math.exp(-blendedLogit));
-
-  assert.equal(history.entries.length, 1);
-  assert.equal(history.entries[0]?.confidence, expectedConfidence);
 });
 
-test("PredictionHistoryService keeps recalculated confidence expressive for small reference deltas", async () => {
-  const storageDirectoryPath = await fs.mkdtemp(path.join(os.tmpdir(), "prediction-history-test-"));
-  const previousToggle = config.SHOULD_RECALCULATE_HISTORY_CONFIDENCE_ON_STARTUP;
-  const predictionHistoryService = new PredictionHistoryService({ storageDirectoryPath, referenceDeltaReader: () => 0.0005 });
-  await fs.writeFile(
-    path.join(storageDirectoryPath, "btc-5m.json"),
-    JSON.stringify({
-      entries: [
-        {
-          slug: "btc-updown-5m-1773425100",
-          asset: "btc",
-          window: "5m",
-          marketStart: "2026-03-13T18:05:00.000Z",
-          marketEnd: "2026-03-13T18:10:00.000Z",
-          predictionMadeAt: "2026-03-13T18:08:51.626Z",
-          progressWhenPredicted: 0.76,
-          observedPrice: 71038.28,
-          upPrice: null,
-          downPrice: null,
-          predictedDelta: 0.001,
-          confidence: 0.01,
-          predictedDirection: "UP",
-          modelVersion: "btc-5m-2026-03-13T18:07:48.948Z",
-          actualDelta: null,
-          actualDirection: null,
-          isCorrect: null,
-        },
-      ],
-    }),
-    "utf8",
-  );
+function buildPredictionService(options?: {
+  predict?: () => Promise<number>;
+  recentReferenceDelta?: number;
+  trainedMarketCount?: number;
+}): PredictionService {
+  const predictionServiceOptions: PredictionServiceOptions = {
+    modelRegistryService: {
+      predict: options?.predict || (async () => 0.5),
+      getPredictionContext: () => ({
+        metadata: null,
+        trainedMarketCount: options?.trainedMarketCount ?? 120,
+        modelVersion: "model-v1",
+        hasCheckpoint: true,
+        recentReferenceDelta: options?.recentReferenceDelta ?? 0.004,
+      }),
+    } as unknown as PredictionServiceOptions["modelRegistryService"],
+    marketFeatureProjectorService: { projectSequence: () => ({ labels: ["progress"], rows: [[0.5]], maxSequenceLength: 600 }) } as unknown as
+      PredictionServiceOptions["marketFeatureProjectorService"],
+    now: () => "2026-03-13T00:00:00.000Z",
+  };
+  return new PredictionService(predictionServiceOptions);
+}
 
-  (config as { SHOULD_RECALCULATE_HISTORY_CONFIDENCE_ON_STARTUP: boolean }).SHOULD_RECALCULATE_HISTORY_CONFIDENCE_ON_STARTUP = true;
-
-  try {
-    await predictionHistoryService.initialize();
-  } finally {
-    (config as { SHOULD_RECALCULATE_HISTORY_CONFIDENCE_ON_STARTUP: boolean }).SHOULD_RECALCULATE_HISTORY_CONFIDENCE_ON_STARTUP = previousToggle;
-  }
-
-  const history = await predictionHistoryService.loadHistory({ asset: "btc", window: "5m" });
-
-  assert.equal(history.entries.length, 1);
-  assert.ok((history.entries[0]?.confidence || 0) > 0.9);
-});
-
-test("PredictionHistoryService can skip stored confidence recalculation on startup", async () => {
-  const storageDirectoryPath = await fs.mkdtemp(path.join(os.tmpdir(), "prediction-history-test-"));
-  const previousToggle = config.SHOULD_RECALCULATE_HISTORY_CONFIDENCE_ON_STARTUP;
-  const predictionHistoryService = new PredictionHistoryService({ storageDirectoryPath, referenceDeltaReader: () => 0.04 });
-  await fs.writeFile(
-    path.join(storageDirectoryPath, "btc-5m.json"),
-    JSON.stringify({
-      entries: [
-        {
-          slug: "btc-updown-5m-1773425100",
-          asset: "btc",
-          window: "5m",
-          marketStart: "2026-03-13T18:05:00.000Z",
-          marketEnd: "2026-03-13T18:10:00.000Z",
-          predictionMadeAt: "2026-03-13T18:08:51.626Z",
-          progressWhenPredicted: 0.76,
-          observedPrice: 71038.28,
-          upPrice: 0.3,
-          downPrice: 0.71,
-          predictedDelta: 0.02,
-          confidence: 0.01,
-          predictedDirection: "UP",
-          modelVersion: "btc-5m-2026-03-13T18:07:48.948Z",
-          actualDelta: null,
-          actualDirection: null,
-          isCorrect: null,
-        },
-      ],
-    }),
-    "utf8",
-  );
-
-  (config as { SHOULD_RECALCULATE_HISTORY_CONFIDENCE_ON_STARTUP: boolean }).SHOULD_RECALCULATE_HISTORY_CONFIDENCE_ON_STARTUP = false;
-
-  try {
-    await predictionHistoryService.initialize();
-  } finally {
-    (config as { SHOULD_RECALCULATE_HISTORY_CONFIDENCE_ON_STARTUP: boolean }).SHOULD_RECALCULATE_HISTORY_CONFIDENCE_ON_STARTUP = previousToggle;
-  }
-
-  const history = await predictionHistoryService.loadHistory({ asset: "btc", window: "5m" });
-
-  assert.equal(history.entries.length, 1);
-  assert.equal(history.entries[0]?.confidence, 0.01);
-});
+function buildPredictionItem(overrides?: Partial<PredictionItem>): PredictionItem {
+  return {
+    slug: "btc-updown-5m-1773425100",
+    asset: "btc",
+    window: "5m",
+    snapshotCount: 3,
+    progress: 0.9,
+    modelConfidence: 0.7,
+    confidence: 0.82,
+    predictedDelta: -0.01,
+    predictedDirection: "DOWN",
+    observedPrice: 70990,
+    modelVersion: "model-v1",
+    trainedMarketCount: 200,
+    generatedAt: "2026-03-13T18:09:30.000Z",
+    ...overrides,
+  };
+}
 
 function buildMarketInput(options?: { upPrice?: number | null; downPrice?: number | null }): PredictionMarketInput {
   const upPrice = options?.upPrice === undefined ? 0.59 : options.upPrice;
@@ -776,29 +415,61 @@ function buildMarketInput(options?: { upPrice?: number | null; downPrice?: numbe
   };
 }
 
-function buildLivePredictionSnapshot(generatedAtIso: string, upPrice: number, downPrice: number): PredictionMarketInput["snapshots"][number] {
-  const livePredictionSnapshot = { ...buildBaseLivePredictionSnapshot(generatedAtIso), upPrice, downPrice };
-  return livePredictionSnapshot;
+function buildResolvedHistoryEntries(asset: string, window: string, resolvedPredictionCount: number, correctPredictionCount: number): PredictionHistoryEntry[] {
+  const entries: PredictionHistoryEntry[] = [];
+  for (let index = 0; index < resolvedPredictionCount; index += 1) {
+    const isCorrect = index < correctPredictionCount;
+    entries.push({
+      slug: `${asset}-${window}-${index}`,
+      asset: asset as PredictionHistoryEntry["asset"],
+      window: window as PredictionHistoryEntry["window"],
+      marketStart: "2026-03-13T18:05:00.000Z",
+      marketEnd: "2026-03-13T18:10:00.000Z",
+      predictionMadeAt: "2026-03-13T18:08:51.626Z",
+      progressWhenPredicted: 0.8,
+      observedPrice: 71038.28,
+      upPrice: 0.48,
+      downPrice: 0.52,
+      predictedDelta: isCorrect ? -0.01 : 0.01,
+      confidence: 0.8,
+      predictedDirection: isCorrect ? "DOWN" : "UP",
+      modelVersion: `${asset}-${window}-model`,
+      isExecuted: true,
+      skipReason: null,
+      actualDelta: -0.02,
+      actualDirection: "DOWN",
+      isCorrect,
+    });
+  }
+  return entries;
 }
 
-function buildBaseLivePredictionSnapshot(generatedAtIso: string): PredictionMarketInput["snapshots"][number] {
-  const livePredictionSnapshot: PredictionMarketInput["snapshots"][number] = {
-    asset: "btc", window: "5m", generatedAt: Date.parse(generatedAtIso),
-    marketId: null, marketSlug: "btc-updown-5m-1773425100", marketConditionId: null,
-    marketStart: "2026-03-13T18:05:00.000Z", marketEnd: "2026-03-13T18:10:00.000Z", priceToBeat: 71000,
-    upAssetId: null, upPrice: null, upOrderBook: null, upEventTs: null,
-    downAssetId: null, downPrice: null, downOrderBook: null, downEventTs: null,
-    binancePrice: null, binanceOrderBook: null, binanceEventTs: null,
-    coinbasePrice: null, coinbaseOrderBook: null, coinbaseEventTs: null,
-    krakenPrice: null, krakenOrderBook: null, krakenEventTs: null,
-    okxPrice: null, okxOrderBook: null, okxEventTs: null,
-    chainlinkPrice: null, chainlinkOrderBook: null, chainlinkEventTs: null,
+function buildUnresolvedHistoryEntry(): PredictionHistoryEntry {
+  return {
+    slug: "btc-updown-5m-1773425100",
+    asset: "btc",
+    window: "5m",
+    marketStart: "2026-03-13T18:05:00.000Z",
+    marketEnd: "2026-03-13T18:10:00.000Z",
+    predictionMadeAt: "2026-03-13T18:08:51.626Z",
+    progressWhenPredicted: 0.76,
+    observedPrice: 71038.28,
+    upPrice: 0.3,
+    downPrice: 0.71,
+    predictedDelta: 0.0005,
+    confidence: 0.72,
+    predictedDirection: "UP",
+    modelVersion: "btc-5m-2026-03-13T18:07:48.948Z",
+    isExecuted: true,
+    skipReason: null,
+    actualDelta: null,
+    actualDirection: null,
+    isCorrect: null,
   };
-  return livePredictionSnapshot;
 }
 
-function buildLivePredictionStatePayload(): Awaited<ReturnType<ConstructorParameters<typeof LivePredictionService>[0]["collectorClientService"]["loadState"]>> {
-  const statePayload: Awaited<ReturnType<ConstructorParameters<typeof LivePredictionService>[0]["collectorClientService"]["loadState"]>> = {
+function buildLivePredictionStatePayload(latestGeneratedAtIso = "2026-03-13T18:09:30.000Z", upPrice = 0.48, downPrice = 0.52): CollectorStatePayload {
+  return {
     generatedAt: "2026-03-13T18:09:31.000Z",
     markets: [
       {
@@ -814,15 +485,14 @@ function buildLivePredictionStatePayload(): Awaited<ReturnType<ConstructorParame
           marketEnd: "2026-03-13T18:10:00.000Z",
         },
         snapshotCount: 3,
-        latestSnapshot: { ...buildLivePredictionSnapshot("2026-03-13T18:09:30.000Z", 0.12, 0.88), chainlinkPrice: 70980 },
+        latestSnapshot: { ...buildLivePredictionSnapshot(latestGeneratedAtIso, upPrice, downPrice), chainlinkPrice: 70980 },
       },
     ],
   };
-  return statePayload;
 }
 
-function buildLivePredictionMarketPayload(): Awaited<ReturnType<ConstructorParameters<typeof LivePredictionService>[0]["collectorClientService"]["loadMarketSnapshots"]>> {
-  const marketPayload: Awaited<ReturnType<ConstructorParameters<typeof LivePredictionService>[0]["collectorClientService"]["loadMarketSnapshots"]>> = {
+function buildLivePredictionMarketPayload(latestGeneratedAtIso = "2026-03-13T18:09:30.000Z", latestUpPrice = 0.48, latestDownPrice = 0.52): MarketSnapshotPayload {
+  return {
     slug: "btc-updown-5m-1773425100",
     asset: "btc",
     window: "5m",
@@ -830,11 +500,25 @@ function buildLivePredictionMarketPayload(): Awaited<ReturnType<ConstructorParam
     marketEnd: "2026-03-13T18:10:00.000Z",
     snapshots: [
       buildLivePredictionSnapshot("2026-03-13T18:07:30.000Z", 0.41, 0.59),
-      buildLivePredictionSnapshot("2026-03-13T18:08:45.000Z", 0.27, 0.73),
-      buildLivePredictionSnapshot("2026-03-13T18:09:30.000Z", 0.12, 0.88),
+      buildLivePredictionSnapshot("2026-03-13T18:08:45.000Z", 0.44, 0.56),
+      buildLivePredictionSnapshot(latestGeneratedAtIso, latestUpPrice, latestDownPrice),
     ],
   };
-  return marketPayload;
+}
+
+function buildResolutionMarketPayload(upPrice: number | null, downPrice: number | null): MarketSnapshotPayload {
+  return {
+    slug: "btc-updown-5m-1773425100",
+    asset: "btc",
+    window: "5m",
+    marketStart: "2026-03-13T18:05:00.000Z",
+    marketEnd: "2026-03-13T18:10:00.000Z",
+    snapshots: [{ ...buildLivePredictionSnapshot("2026-03-13T18:10:00.000Z", 0.5, 0.5), upPrice, downPrice }],
+  };
+}
+
+function buildLivePredictionSnapshot(generatedAtIso: string, upPrice: number, downPrice: number): PredictionMarketInput["snapshots"][number] {
+  return { ...buildBaseLivePredictionSnapshot(generatedAtIso), upPrice, downPrice };
 }
 
 function buildPredictionSnapshot(
@@ -847,73 +531,71 @@ function buildPredictionSnapshot(
   krakenPrice: number,
   okxPrice: number,
 ): PredictionMarketInput["snapshots"][number] {
-  const generatedAt = Date.parse(generatedAtIso);
-  const exchangeFields = buildExchangeFields(chainlinkPrice, binancePrice, coinbasePrice, krakenPrice, okxPrice);
   return {
-    asset: "btc",
-    window: "5m",
-    generatedAt,
-    marketId: null,
-    marketSlug: "btc-5m-test",
-    marketConditionId: null,
-    marketStart: "2026-03-13T00:00:00.000Z",
-    marketEnd: "2026-03-13T00:05:00.000Z",
-    priceToBeat: 100,
-    upAssetId: null,
+    ...buildBasePredictionSnapshot(generatedAtIso),
     upPrice,
-    upOrderBook: upPrice === null ? null : { bids: [{ price: upPrice - 0.01, size: 1 }], asks: [{ price: upPrice + 0.01, size: 1 }] },
-    upEventTs: null,
-    downAssetId: null,
+    upOrderBook: buildPolymarketOrderBook(upPrice),
     downPrice,
-    downOrderBook: downPrice === null ? null : { bids: [{ price: downPrice - 0.01, size: 1 }], asks: [{ price: downPrice + 0.01, size: 1 }] },
-    downEventTs: null,
-    ...exchangeFields,
+    downOrderBook: buildPolymarketOrderBook(downPrice),
+    binancePrice,
+    binanceOrderBook: buildProviderOrderBook("binance", binancePrice),
+    coinbasePrice,
+    coinbaseOrderBook: buildProviderOrderBook("coinbase", coinbasePrice),
+    krakenPrice,
+    krakenOrderBook: buildProviderOrderBook("kraken", krakenPrice),
+    okxPrice,
+    okxOrderBook: buildProviderOrderBook("okx", okxPrice),
+    chainlinkPrice,
+    chainlinkOrderBook: buildProviderOrderBook("chainlink", chainlinkPrice),
   };
+}
+
+function buildBaseLivePredictionSnapshot(generatedAtIso: string): PredictionMarketInput["snapshots"][number] {
+  return { ...BASE_LIVE_SNAPSHOT, generatedAt: Date.parse(generatedAtIso) };
+}
+
+function buildBasePredictionSnapshot(generatedAtIso: string): PredictionMarketInput["snapshots"][number] {
+  return { ...BASE_PREDICTION_SNAPSHOT, generatedAt: Date.parse(generatedAtIso) };
 }
 
 function buildProviderOrderBook(provider: string, price: number): NonNullable<PredictionMarketInput["snapshots"][number]["binanceOrderBook"]> {
   return { type: "orderbook", provider, symbol: "btc", ts: 1, bids: [{ price, size: 1 }], asks: [{ price: price + 0.1, size: 1 }] };
 }
 
-function buildExchangeFields(
-  chainlinkPrice: number,
-  binancePrice: number,
-  coinbasePrice: number,
-  krakenPrice: number,
-  okxPrice: number,
-): Pick<
-  PredictionMarketInput["snapshots"][number],
-  | "binancePrice"
-  | "binanceOrderBook"
-  | "binanceEventTs"
-  | "coinbasePrice"
-  | "coinbaseOrderBook"
-  | "coinbaseEventTs"
-  | "krakenPrice"
-  | "krakenOrderBook"
-  | "krakenEventTs"
-  | "okxPrice"
-  | "okxOrderBook"
-  | "okxEventTs"
-  | "chainlinkPrice"
-  | "chainlinkOrderBook"
-  | "chainlinkEventTs"
-> {
-  return {
-    binancePrice,
-    binanceOrderBook: buildProviderOrderBook("binance", binancePrice),
-    binanceEventTs: null,
-    coinbasePrice,
-    coinbaseOrderBook: buildProviderOrderBook("coinbase", coinbasePrice),
-    coinbaseEventTs: null,
-    krakenPrice,
-    krakenOrderBook: buildProviderOrderBook("kraken", krakenPrice),
-    krakenEventTs: null,
-    okxPrice,
-    okxOrderBook: buildProviderOrderBook("okx", okxPrice),
-    okxEventTs: null,
-    chainlinkPrice,
-    chainlinkOrderBook: buildProviderOrderBook("chainlink", chainlinkPrice),
-    chainlinkEventTs: null,
-  };
+function buildPolymarketOrderBook(price: number | null): NonNullable<PredictionMarketInput["snapshots"][number]["upOrderBook"]> | null {
+  return price === null ? null : { bids: [{ price: price - 0.01, size: 1 }], asks: [{ price: price + 0.01, size: 1 }] };
+}
+
+async function recordPredictionCall(_: number): Promise<PredictionItem> {
+  return buildPredictionItem();
+}
+
+async function writeHistoryFixture(storageDirectoryPath: string, confidence: number): Promise<void> {
+  await fs.writeFile(
+    path.join(storageDirectoryPath, "btc-5m.json"),
+    JSON.stringify({
+      entries: [
+        {
+          slug: "btc-updown-5m-1773425100",
+          asset: "btc",
+          window: "5m",
+          marketStart: "2026-03-13T18:05:00.000Z",
+          marketEnd: "2026-03-13T18:10:00.000Z",
+          predictionMadeAt: "2026-03-13T18:08:51.626Z",
+          progressWhenPredicted: 0.76,
+          observedPrice: 71038.28,
+          upPrice: 0.3,
+          downPrice: 0.71,
+          predictedDelta: 0.02,
+          confidence,
+          predictedDirection: "UP",
+          modelVersion: "btc-5m-2026-03-13T18:07:48.948Z",
+          actualDelta: null,
+          actualDirection: null,
+          isCorrect: null,
+        },
+      ],
+    }),
+    "utf8",
+  );
 }

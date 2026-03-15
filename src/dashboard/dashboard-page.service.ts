@@ -100,10 +100,13 @@ export class DashboardPageService {
     const predictionConfidence = card.latestPrediction?.confidence.toFixed(2) || "--";
     const resultValue = this.formatUsd(card.resultUsd);
     const hitRateValue = card.hitRatePercent === null ? "--" : `${card.hitRatePercent.toFixed(0)}%`;
+    const tradeStatus = card.latestPrediction === null ? "--" : card.latestPrediction.isExecuted ? "Executed" : "Shadow";
+    const skipReason = card.latestPrediction?.isExecuted === false ? (card.latestPrediction.skipReason || "--").replaceAll("_", " ") : "--";
     const factMarkup = [
       this.renderFact("Result", resultValue, "Total USD result from buying 5 shares on each valid resolved prediction at the entry price."),
       this.renderFact("Hit rate", hitRateValue, "Correct predictions as a share of resolved predictions."),
-      this.renderFact("Snapshots", String(card.snapshotCount), "Snapshots ingested for the current live market."),
+      this.renderFact("Trade", tradeStatus, "Whether the latest prediction would have executed a trade or only remained as shadow history."),
+      this.renderFact("Skip", skipReason, "Reason why the latest prediction stayed as shadow history instead of executing."),
       this.renderFact("Confidence", predictionConfidence, "Model confidence for the latest directional call."),
       this.renderFact("Trained", String(card.modelStatus.trainedMarketCount), "Closed markets already used for model training."),
       this.renderFact("Pending closed", String(card.pendingClosedMarketCount), "Closed markets still waiting to be trained."),

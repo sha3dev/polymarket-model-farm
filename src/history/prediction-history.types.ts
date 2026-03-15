@@ -25,6 +25,8 @@ export type PredictionHistoryEntry = {
   confidence: number;
   predictedDirection: PredictionDirection;
   modelVersion: string;
+  isExecuted: boolean;
+  skipReason: string | null;
   actualDelta: number | null;
   actualDirection: PredictionDirection | null;
   isCorrect: boolean | null;

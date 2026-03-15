@@ -98,7 +98,9 @@ export class DashboardService {
     hitRatePercent: number | null;
     resultUsd: number | null;
   } {
-    const resolvedEntries = predictionHistory.filter((entry) => entry.actualDirection !== null && entry.confidence >= config.MIN_VALID_PREDICTION_CONFIDENCE);
+    const resolvedEntries = predictionHistory.filter(
+      (entry) => entry.actualDirection !== null && entry.isExecuted === true && entry.confidence >= config.MIN_VALID_PREDICTION_CONFIDENCE,
+    );
     const resolvedPredictionCount = resolvedEntries.length;
     const correctPredictionCount = resolvedEntries.filter((entry) => entry.isCorrect === true).length;
     const realizedUsd = resolvedEntries.reduce((sum, entry) => {

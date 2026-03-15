@@ -1,6 +1,8 @@
 # @sha3/polymarket-model-farm
 
-Train and serve eight TensorFlow GRU models for Polymarket crypto window markets: `btc|eth|sol|xrp` across `5m|15m`.
+Train and serve eight TensorFlow GRU slots for Polymarket crypto window markets: `btc|eth|sol|xrp` across `5m|15m`.
+
+The runtime continuously trains on closed markets, evaluates live markets inside a bounded opportunity window, and keeps a lightweight local history so the dashboard can show recent trade quality.
 
 ## TL;DR
 
@@ -10,19 +12,6 @@ npm run check
 npm run start
 ```
 
-Then open `http://0.0.0.0:3000/dashboard`.
-
-## Why
-
-This service exists to turn full Polymarket market lifecycles into recurrent TensorFlow training samples and expose one-shot `UP/DOWN` predictions early enough to evaluate a hold-to-expiry strategy.
-
-## Main Capabilities
-
-- trains eight GRU model slots continuously from the collector history
-- keeps exchange and Polymarket order book state as sequence features
-- emits staged live predictions at the configured `LIVE_PREDICTION_PROGRESS_STEPS`, keeping the first one that clears the confidence threshold and entry-price guards
-- stores prediction history locally so hits and misses remain visible in the dashboard
-
 ## Setup
 
 ```bash
@@ -31,41 +20,18 @@ npm run check
 npm run start
 ```
 
-The service expects a running `polymarket-snapshot-collector` at `http://localhost:3000` unless `COLLECTOR_BASE_URL` overrides it.
+The service expects a running `polymarket-snapshot-collector` at `http://localhost:3000` unless `COLLECTOR_BASE_URL` overrides it. Default bind is `http://0.0.0.0:3000`.
 
-## Usage
+## Why
 
-Start the full runtime:
+The project turns full market lifecycles into sequential training samples and then reuses the same feature pipeline to decide whether a live Polymarket setup is worth executing.
 
-```ts
-import { ServiceRuntime } from "@sha3/polymarket-model-farm";
+## Main Capabilities
 
-const runtime = ServiceRuntime.createDefault();
-await runtime.startServer();
-```
-
-Build the server without binding a port:
-
-```ts
-import { ServiceRuntime } from "@sha3/polymarket-model-farm";
-
-const runtime = ServiceRuntime.createDefault();
-const server = runtime.buildServer();
-```
-
-Read current live predictions:
-
-```bash
-curl "http://127.0.0.1:3000/predictions?asset=btc&window=5m"
-```
-
-Open the evaluation dashboard:
-
-```bash
-open http://127.0.0.1:3000/dashboard
-```
-
-## API
+- trains one GRU slot per `asset/window`
+- keeps exchange, Chainlink, and Polymarket state in the sequence
+- evaluates live markets only inside a bounded opportunity window
+- stores executed and shadow predictions locally for dashboard scoring
 
 ## Installation
 
@@ -79,17 +45,16 @@ npm install
 npm run start
 ```
 
-Default bind: `http://0.0.0.0:3000`.
+## Usage
 
-## Examples
+Common entrypoints:
 
-Read live BTC `5m` predictions:
+```ts
+import { ServiceRuntime } from "@sha3/polymarket-model-farm";
 
-```bash
-curl "http://127.0.0.1:3000/predictions?asset=btc&window=5m"
+const runtime = ServiceRuntime.createDefault();
+await runtime.startServer();
 ```
-
-Build the server without binding:
 
 ```ts
 import { ServiceRuntime } from "@sha3/polymarket-model-farm";
@@ -97,6 +62,20 @@ import { ServiceRuntime } from "@sha3/polymarket-model-farm";
 const runtime = ServiceRuntime.createDefault();
 const server = runtime.buildServer();
 ```
+
+Useful local commands:
+
+```bash
+curl "http://127.0.0.1:3000/predictions?asset=btc&window=5m"
+open http://127.0.0.1:3000/dashboard
+```
+
+## Examples
+
+- `curl "http://127.0.0.1:3000/predictions?asset=btc&window=5m"`
+- `open http://127.0.0.1:3000/dashboard`
+
+## API
 
 ## HTTP API
 
@@ -140,8 +119,17 @@ Returns the latest one-shot live predictions already emitted for the currently a
 
 Behavior notes:
 
-- predictions are attempted at each configured progress step from `LIVE_PREDICTION_PROGRESS_STEPS`
-- the first attempt whose confidence clears `MIN_VALID_PREDICTION_CONFIDENCE`, whose raw model-vs-market disagreement stays within `MAX_MODEL_MARKET_DISAGREEMENT`, and whose chosen-side entry price stays inside `[MIN_VALID_ENTRY_PRICE, MAX_VALID_ENTRY_PRICE]` is the one persisted for that market
+- predictions are only evaluated while market progress stays inside `[MIN_OPPORTUNITY_PROGRESS, MAX_OPPORTUNITY_PROGRESS]`
+- reevaluation only happens when progress advances enough or when `UP/DOWN` prices move enough to justify another model inference
+- when a prediction is stored, it is marked either as an executed trade or as a shadow prediction
+- executed trades require all of the following:
+  - `confidence >= MIN_VALID_PREDICTION_CONFIDENCE`
+  - raw model-vs-market disagreement within `MAX_MODEL_MARKET_DISAGREEMENT`
+  - chosen-side entry price inside `[MIN_VALID_ENTRY_PRICE, MAX_VALID_ENTRY_PRICE]`
+  - edge at least `MIN_PREDICTION_EDGE`
+  - opportunity score at least `MIN_OPPORTUNITY_SCORE`
+  - once a slot has enough resolved history, it must be a hit-rate leader for its window and also stay at or above `MIN_VALID_HIT_RATE_FOR_EXECUTION`
+- non-executed shadow predictions still remain in history so weaker models can keep updating their shadow hit rate without placing trades
 - confidence is a blended probability in `[0, 1]` that combines the model view with the live market price when `UP/DOWN` prices exist
 - higher confidence means the final blended view is more favorable to the chosen side
 - confidence is calculated in six steps:
@@ -372,8 +360,15 @@ All runtime defaults live in `src/config.ts`.
 - `config.MIN_VALID_ENTRY_PRICE`: minimum allowed chosen-side token price for a live prediction to be accepted.
 - `config.MAX_VALID_ENTRY_PRICE`: maximum allowed chosen-side token price for a live prediction to be accepted.
 - `config.MIN_VALID_PREDICTION_CONFIDENCE`: minimum confidence required for a live prediction to be persisted and for a resolved prediction to count toward dashboard result and hit rate.
+- `config.MIN_OPPORTUNITY_PROGRESS`: earliest market progress where live inference is allowed.
+- `config.MAX_OPPORTUNITY_PROGRESS`: latest market progress where live inference is allowed.
+- `config.MIN_PROGRESS_DELTA_FOR_REEVAL`: minimum progress change required before reevaluating the same live market again.
+- `config.MIN_PRICE_DELTA_FOR_REEVAL`: minimum absolute `UP` or `DOWN` price change required before reevaluating the same live market again.
+- `config.MIN_PREDICTION_EDGE`: minimum `confidence - marketPrice` edge required for execution.
+- `config.MIN_OPPORTUNITY_SCORE`: minimum composite opportunity score required for execution.
+- `config.MIN_RESOLVED_PREDICTIONS_FOR_HIT_RATE_GATING`: minimum resolved shadow-history sample size before a slot must become a hit-rate leader in its window to execute trades.
+- `config.MIN_VALID_HIT_RATE_FOR_EXECUTION`: minimum resolved hit rate required for a slot to execute trades once hit-rate gating becomes active.
 - `config.SHOULD_RECALCULATE_HISTORY_CONFIDENCE_ON_STARTUP`: when `true`, rewrites persisted history confidence values during startup using the current confidence formula.
-- `config.LIVE_PREDICTION_PROGRESS_STEPS`: ordered list of staged live-prediction thresholds between `0` and `1`.
 - `config.LIVE_PREDICTION_POLL_INTERVAL_MS`: polling cadence for current live markets.
 - `config.COLLECTOR_STATE_CACHE_TTL_MS`: in-memory TTL for `/state`, `1000ms` by default so the dashboard can show live movement.
 - `config.COLLECTOR_MARKET_CACHE_TTL_MS`: in-memory TTL for `/markets`.
@@ -402,7 +397,7 @@ All runtime defaults live in `src/config.ts`.
 
 ### No models are predicting yet
 
-The prediction route only returns markets that already crossed the first configured staged threshold in `LIVE_PREDICTION_PROGRESS_STEPS` and for which a model checkpoint exists.
+The prediction route only returns markets that are inside the configured opportunity window and for which a model checkpoint exists.
 
 ### The trainer appears idle
 
