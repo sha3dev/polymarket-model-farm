@@ -7,8 +7,7 @@ test("CollectorClientService does not retain snapshot payloads in memory between
   let snapshotRequestCount = 0;
   const collectorClientService = new CollectorClientService({
     baseUrl: "http://collector.test",
-    fetchFn: async (input: URL | RequestInfo) => {
-      const url = String(input);
+    fetchFn: async (_input: URL | RequestInfo) => {
       snapshotRequestCount += 1;
       return new Response(
         JSON.stringify({

@@ -2,8 +2,8 @@
  * @section imports:internals
  */
 
-import config from "../config.ts";
 import { SUPPORTED_ASSETS, SUPPORTED_WINDOWS } from "../collector/index.ts";
+import config from "../config.ts";
 
 /**
  * @section types
@@ -18,11 +18,11 @@ export type AppInfoPayload = {
 
 type AppInfoServiceOptions = { serviceName: string };
 
-/**
- * @section public:properties
- */
-
 export class AppInfoService {
+  /**
+   * @section private:properties
+   */
+
   private readonly serviceName: string;
 
   /**

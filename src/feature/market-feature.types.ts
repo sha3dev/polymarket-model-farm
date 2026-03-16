@@ -14,7 +14,6 @@ export type FeatureProjectionInput = {
   marketStart: string;
   marketEnd: string;
   priceToBeat: number;
-  prevPriceToBeat?: number[];
   snapshots: Snapshot[];
 };
 

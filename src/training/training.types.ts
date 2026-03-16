@@ -13,7 +13,6 @@ export type TrainingMarketCandidate = {
   asset: SupportedAsset;
   window: SupportedWindow;
   priceToBeat: number;
-  prevPriceToBeat: number[];
   marketStart: string;
   marketEnd: string;
   snapshots: Snapshot[];

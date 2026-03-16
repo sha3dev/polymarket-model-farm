@@ -11,9 +11,7 @@
       "import": "./dist/index.js"
     }
   },
-  "files": [
-    "dist"
-  ],
+  "files": ["dist"],
   "scripts": {
     "start": "node --import tsx src/main.ts",
     "build": "tsc -p tsconfig.build.json",
@@ -31,6 +29,7 @@
   "dependencies": {
     "@hono/node-server": "^1.19.11",
     "@sha3/logger": "^2.0.0",
+    "@sha3/polymarket": "^1.1.0",
     "@tensorflow/tfjs-node": "^4.22.0",
     "dotenv": "^16.6.1",
     "hono": "^4.12.7"

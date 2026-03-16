@@ -74,16 +74,3 @@ export type MarketSnapshotsPayload = {
   marketEnd: string;
   snapshots: Snapshot[];
 };
-
-export type CollectorStateMarket = {
-  asset: SupportedAsset;
-  window: SupportedWindow;
-  market: MarketSummary | null;
-  snapshotCount: number;
-  latestSnapshot: Snapshot | null;
-};
-
-export type CollectorStatePayload = {
-  generatedAt: string;
-  markets: CollectorStateMarket[];
-};

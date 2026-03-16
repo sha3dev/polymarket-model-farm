@@ -12,11 +12,10 @@ import { Hono } from "hono";
  */
 
 import type { AppInfoService } from "../app-info/app-info.service.ts";
-import config from "../config.ts";
-import type { DashboardService } from "../dashboard/index.ts";
-import LOGGER from "../logger.ts";
 import { SUPPORTED_ASSETS, SUPPORTED_WINDOWS } from "../collector/index.ts";
-import type { LivePredictionService } from "../prediction/index.ts";
+import config from "../config.ts";
+import LOGGER from "../logger.ts";
+import type { PredictionFilter, PredictionQueryService } from "../prediction/index.ts";
 
 /**
  * @section types
@@ -24,20 +23,17 @@ import type { LivePredictionService } from "../prediction/index.ts";
 
 type HttpServerServiceOptions = {
   appInfoService: AppInfoService;
-  dashboardService: DashboardService;
-  livePredictionService: LivePredictionService;
+  predictionQueryService: PredictionQueryService;
 };
 
-/**
- * @section public:properties
- */
-
 export class HttpServerService {
+  /**
+   * @section private:properties
+   */
+
   private readonly appInfoService: AppInfoService;
 
-  private readonly dashboardService: DashboardService;
-
-  private readonly livePredictionService: LivePredictionService;
+  private readonly predictionQueryService: PredictionQueryService;
 
   /**
    * @section constructor
@@ -45,69 +41,47 @@ export class HttpServerService {
 
   public constructor(options: HttpServerServiceOptions) {
     this.appInfoService = options.appInfoService;
-    this.dashboardService = options.dashboardService;
-    this.livePredictionService = options.livePredictionService;
+    this.predictionQueryService = options.predictionQueryService;
   }
 
   /**
    * @section private:methods
    */
 
+  private readOptionalAsset(rawAsset: string | undefined): PredictionFilter["asset"] {
+    const asset = rawAsset || null;
+    if (asset && !SUPPORTED_ASSETS.includes(asset as (typeof SUPPORTED_ASSETS)[number])) {
+      throw new Error(`asset must be one of: ${SUPPORTED_ASSETS.join(", ")}`);
+    }
+    return asset as PredictionFilter["asset"];
+  }
+
+  private readOptionalWindow(rawWindow: string | undefined): PredictionFilter["window"] {
+    const window = rawWindow || null;
+    if (window && !SUPPORTED_WINDOWS.includes(window as (typeof SUPPORTED_WINDOWS)[number])) {
+      throw new Error(`window must be one of: ${SUPPORTED_WINDOWS.join(", ")}`);
+    }
+    return window as PredictionFilter["window"];
+  }
+
+  private readPredictionFilter(searchParams: URLSearchParams): PredictionFilter {
+    const asset = this.readOptionalAsset(searchParams.get("asset") || undefined);
+    const window = this.readOptionalWindow(searchParams.get("window") || undefined);
+    const predictionFilter = { asset, window };
+    return predictionFilter;
+  }
+
   private buildPredictionHandler(): (context: Context) => Promise<Response> {
     return async (context) => {
       let response: Response;
       try {
-        const assetParam = context.req.query("asset");
-        const windowParam = context.req.query("window");
-        const filter: { asset?: (typeof SUPPORTED_ASSETS)[number]; window?: (typeof SUPPORTED_WINDOWS)[number] } = {};
-        if (assetParam) {
-          if (!SUPPORTED_ASSETS.includes(assetParam as (typeof SUPPORTED_ASSETS)[number])) {
-            throw new Error(`unsupported asset ${assetParam}`);
-          }
-          filter.asset = assetParam as (typeof SUPPORTED_ASSETS)[number];
-        }
-        if (windowParam) {
-          if (!SUPPORTED_WINDOWS.includes(windowParam as (typeof SUPPORTED_WINDOWS)[number])) {
-            throw new Error(`unsupported window ${windowParam}`);
-          }
-          filter.window = windowParam as (typeof SUPPORTED_WINDOWS)[number];
-        }
+        const predictionFilter = this.readPredictionFilter(new URL(context.req.url).searchParams);
         context.header("content-type", config.RESPONSE_CONTENT_TYPE);
-        response = context.json({ predictions: await this.livePredictionService.listCurrentPredictions(filter) }, 200);
+        response = context.json(await this.predictionQueryService.buildResponse(predictionFilter), 200);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         LOGGER.error(`prediction request failed: ${message}`);
         response = context.json({ error: message }, 400);
-      }
-      return response;
-    };
-  }
-
-  private buildDashboardPayloadHandler(): (context: Context) => Promise<Response> {
-    return async (context) => {
-      let response: Response;
-      try {
-        context.header("content-type", config.RESPONSE_CONTENT_TYPE);
-        response = context.json(await this.dashboardService.buildPayload(), 200);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        LOGGER.error(`dashboard payload request failed: ${message}`);
-        response = context.json({ error: message }, 500);
-      }
-      return response;
-    };
-  }
-
-  private buildDashboardPageHandler(): (context: Context) => Promise<Response> {
-    return async (context) => {
-      let response: Response;
-      try {
-        context.header("content-type", config.HTML_CONTENT_TYPE);
-        response = context.body(await this.dashboardService.buildHtmlDocument(), 200);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        LOGGER.error(`dashboard page request failed: ${message}`);
-        response = context.json({ error: message }, 500);
       }
       return response;
     };
@@ -124,8 +98,6 @@ export class HttpServerService {
       return context.json(this.appInfoService.buildPayload(), 200);
     });
     app.get("/predictions", this.buildPredictionHandler());
-    app.get("/api/dashboard", this.buildDashboardPayloadHandler());
-    app.get("/dashboard", this.buildDashboardPageHandler());
     return createAdaptorServer({ fetch: app.fetch });
   }
 }

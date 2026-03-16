@@ -15,7 +15,6 @@ export type PredictionMarketInput = {
   marketStart: string;
   marketEnd: string;
   priceToBeat: number;
-  prevPriceToBeat?: number[];
   snapshots: Snapshot[];
 };
 
@@ -24,17 +23,17 @@ export type PredictionItem = {
   asset: SupportedAsset;
   window: SupportedWindow;
   snapshotCount: number;
-  progress: number;
-  modelConfidence: number;
-  confidence: number;
-  predictedDelta: number;
+  marketStart: string;
+  marketEnd: string;
+  predictedFinalPrice: number;
   predictedDirection: "UP" | "DOWN";
   observedPrice: number;
-  modelVersion: string;
+  priceToBeat: number;
+  predictedLogReturn: number;
+  lastTrainedAt: string | null;
   trainedMarketCount: number;
   generatedAt: string;
 };
 
+export type PredictionFilter = { asset: SupportedAsset | null; window: SupportedWindow | null };
 export type PredictionResponsePayload = { predictions: PredictionItem[] };
-
-export type PredictionFilter = { asset?: SupportedAsset; window?: SupportedWindow };

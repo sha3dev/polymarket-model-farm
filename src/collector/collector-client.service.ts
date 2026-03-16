@@ -3,7 +3,7 @@
  */
 
 import config from "../config.ts";
-import type { AssetWindow, CacheEntry, CollectorStatePayload, MarketSnapshotsPayload, MarketSummary } from "./index.ts";
+import type { AssetWindow, CacheEntry, MarketSnapshotsPayload, MarketSummary } from "./index.ts";
 
 /**
  * @section types
@@ -15,18 +15,16 @@ type CollectorClientServiceOptions = {
   now: () => number;
 };
 
-/**
- * @section public:properties
- */
-
 export class CollectorClientService {
+  /**
+   * @section private:properties
+   */
+
   private readonly baseUrl: string;
 
   private readonly fetchFn: typeof fetch;
 
   private readonly now: () => number;
-
-  private readonly stateCache: Map<string, CacheEntry<CollectorStatePayload>>;
 
   private readonly marketCache: Map<string, CacheEntry<MarketSummary[]>>;
 
@@ -38,7 +36,6 @@ export class CollectorClientService {
     this.baseUrl = options.baseUrl;
     this.fetchFn = options.fetchFn;
     this.now = options.now;
-    this.stateCache = new Map();
     this.marketCache = new Map();
   }
 
@@ -105,20 +102,5 @@ export class CollectorClientService {
     const response = await this.fetchFn(new URL(`/markets/${slug}/snapshots`, this.baseUrl));
     await this.assertSuccessfulResponse(response, `collector snapshot request failed for slug ${slug}`);
     return (await response.json()) as MarketSnapshotsPayload;
-  }
-
-  public async loadState(): Promise<CollectorStatePayload> {
-    const cachedState = this.readCacheEntry(this.stateCache, "state");
-    let payload = cachedState;
-    if (!cachedState) {
-      const response = await this.fetchFn(new URL("/state", this.baseUrl));
-      await this.assertSuccessfulResponse(response, "collector state request failed");
-      payload = (await response.json()) as CollectorStatePayload;
-      this.writeCacheEntry(this.stateCache, "state", payload, config.COLLECTOR_STATE_CACHE_TTL_MS);
-    }
-    if (!payload) {
-      throw new Error("collector state payload is unavailable");
-    }
-    return { ...payload, markets: payload.markets.slice() };
   }
 }

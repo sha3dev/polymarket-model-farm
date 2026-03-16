@@ -12,7 +12,7 @@ import type { AssetWindow } from "../collector/index.ts";
 import { SUPPORTED_ASSETS, SUPPORTED_WINDOWS } from "../collector/index.ts";
 import config from "../config.ts";
 import { ModelDefinitionService, ModelStoreService } from "./index.ts";
-import type { ModelMetadata, ModelPredictionContext, ModelSlotState, ModelSlotStatus, TrainingLedger } from "./index.ts";
+import type { ModelPredictionContext, ModelSlotState, ModelSlotStatus, TrainingLedger } from "./index.ts";
 
 /**
  * @section types
@@ -24,11 +24,11 @@ type ModelRegistryServiceOptions = {
   featureCount: number;
 };
 
-/**
- * @section public:properties
- */
-
 export class ModelRegistryService {
+  /**
+   * @section private:properties
+   */
+
   private readonly modelDefinitionService: ModelDefinitionService;
 
   private readonly modelStoreService: ModelStoreService;
@@ -74,7 +74,7 @@ export class ModelRegistryService {
       lastTrainedSlug: null,
       lastTrainedAt: null,
       modelVersion: "untrained",
-      recentTargetDeltas: [],
+      recentTargetValues: [],
     };
     return nextLedger;
   }
@@ -97,7 +97,7 @@ export class ModelRegistryService {
   }
 
   private buildInputTensor(pair: AssetWindow, sequence: number[][]): tf.Tensor3D {
-    const maxSequenceLength = pair.window === "5m" ? 600 : 1800;
+    const maxSequenceLength = pair.window === "5m" ? 60 : 90;
     const boundedSequence = sequence.slice(0, maxSequenceLength);
     if (boundedSequence.length === 0) {
       boundedSequence.push(new Array(this.featureCount).fill(0));
@@ -105,20 +105,20 @@ export class ModelRegistryService {
     return tf.tensor3d([boundedSequence], [1, boundedSequence.length, this.featureCount]);
   }
 
-  private clamp(value: number, lowerBound: number, upperBound: number): number {
-    const clampedValue = Math.min(Math.max(value, lowerBound), upperBound);
-    return clampedValue;
-  }
-
   private hasAnyTrainingSlot(): boolean {
     const hasAnyTrainingSlot = [...this.slots.values()].some((slot) => slot.isTraining);
     return hasAnyTrainingSlot;
   }
 
-  private computeReferenceDelta(recentTargetDeltas: number[]): number {
-    const absoluteDeltas = recentTargetDeltas.map((targetDelta) => Math.abs(targetDelta)).filter((targetDelta) => targetDelta > 0);
-    const referenceDelta = absoluteDeltas.length === 0 ? 0 : absoluteDeltas.reduce((sum, value) => sum + value, 0) / absoluteDeltas.length;
-    return referenceDelta;
+  private async fitModel(model: tf.LayersModel, inputTensor: tf.Tensor3D, targetTensor: tf.Tensor2D): Promise<void> {
+    await model.fit(inputTensor, targetTensor, { epochs: config.TRAINING_EPOCHS_PER_MARKET, batchSize: config.TRAINING_BATCH_SIZE, verbose: 0, shuffle: false });
+  }
+
+  private async persistCheckpoint(pair: AssetWindow, slot: ModelSlotState, model: tf.LayersModel, checkpointedAt: string): Promise<void> {
+    slot.metadata = this.modelDefinitionService.buildMetadata(pair, this.featureCount, checkpointedAt);
+    slot.hasCheckpoint = true;
+    slot.ledger.modelVersion = slot.metadata.modelVersion;
+    await this.modelStoreService.saveModelArtifacts(pair, model, slot.metadata);
   }
 
   /**
@@ -133,6 +133,7 @@ export class ModelRegistryService {
         const metadata = await this.modelStoreService.loadMetadata(pair);
         const model = await this.modelStoreService.loadModel(pair);
         if (model) {
+          // Loaded checkpoints must be compiled again before they can be reused for fit()/predict().
           this.modelDefinitionService.compileModel(model);
         }
         const ledger = this.buildLedger(pair, await this.modelStoreService.loadLedger(pair));
@@ -152,7 +153,7 @@ export class ModelRegistryService {
     }
   }
 
-  public async train(pair: AssetWindow, sequence: number[][], boundedTarget: number): Promise<void> {
+  public async train(pair: AssetWindow, sequence: number[][], targetValue: number): Promise<void> {
     const slot = this.requireSlot(pair);
     if (this.hasAnyTrainingSlot()) {
       throw new Error(`another model slot is already training while requesting ${pair.asset}/${pair.window}`);
@@ -165,12 +166,9 @@ export class ModelRegistryService {
     let targetTensor: tf.Tensor2D | null = null;
     try {
       inputTensor = this.buildInputTensor(pair, sequence);
-      targetTensor = tf.tensor2d([[boundedTarget]]);
-      await model.fit(inputTensor, targetTensor, { epochs: config.TRAINING_EPOCHS_PER_MARKET, batchSize: config.TRAINING_BATCH_SIZE, verbose: 0, shuffle: false });
-      slot.metadata = this.modelDefinitionService.buildMetadata(pair, this.featureCount, checkpointedAt);
-      slot.hasCheckpoint = true;
-      slot.ledger.modelVersion = slot.metadata.modelVersion;
-      await this.modelStoreService.saveModelArtifacts(pair, model, slot.metadata);
+      targetTensor = tf.tensor2d([[targetValue]]);
+      await this.fitModel(model, inputTensor, targetTensor);
+      await this.persistCheckpoint(pair, slot, model, checkpointedAt);
     } catch (error) {
       slot.latestTrainingError = error instanceof Error ? error.message : String(error);
       throw error;
@@ -181,10 +179,11 @@ export class ModelRegistryService {
     }
   }
 
-  public async markMarketAsTrained(pair: AssetWindow, slug: string, trainedAt: string, rawTargetDelta: number): Promise<void> {
+  public async markMarketAsTrained(pair: AssetWindow, slug: string, trainedAt: string, targetValue: number): Promise<void> {
     const slot = this.requireSlot(pair);
     if (!slot.ledger.trainedMarketSlugs.includes(slug)) {
-      const recentTargetDeltas = [...slot.ledger.recentTargetDeltas, rawTargetDelta].slice(-config.RECENT_TARGET_DELTA_LIMIT);
+      // Keep only a short recent target history so slot storage remains compact while preserving recent training context.
+      const recentTargetValues = [...slot.ledger.recentTargetValues, targetValue].slice(-config.RECENT_TARGET_VALUE_LIMIT);
       slot.ledger = {
         ...slot.ledger,
         trainedMarketSlugs: [...slot.ledger.trainedMarketSlugs, slug],
@@ -192,7 +191,7 @@ export class ModelRegistryService {
         lastTrainedSlug: slug,
         lastTrainedAt: trainedAt,
         modelVersion: slot.metadata?.modelVersion || slot.ledger.modelVersion,
-        recentTargetDeltas,
+        recentTargetValues,
       };
       await this.modelStoreService.saveLedger(pair, slot.ledger);
     }
@@ -205,17 +204,17 @@ export class ModelRegistryService {
     }
     let inputTensor: tf.Tensor3D | null = null;
     let predictionTensor: tf.Tensor | null = null;
-    let boundedPrediction = 0;
+    let predictedValue = 0;
     try {
       inputTensor = this.buildInputTensor(pair, sequence);
       predictionTensor = this.ensureModel(slot).predict(inputTensor) as tf.Tensor;
       const predictionValues = await predictionTensor.data();
-      boundedPrediction = this.clamp(predictionValues[0] || 0, -1, 1);
+      predictedValue = predictionValues[0] || 0;
     } finally {
       inputTensor?.dispose();
       predictionTensor?.dispose();
     }
-    return boundedPrediction;
+    return predictedValue;
   }
 
   public hasTrainedMarket(pair: AssetWindow, slug: string): boolean {
@@ -225,13 +224,7 @@ export class ModelRegistryService {
 
   public getPredictionContext(pair: AssetWindow): ModelPredictionContext {
     const slot = this.requireSlot(pair);
-    return {
-      metadata: slot.metadata,
-      trainedMarketCount: slot.ledger.trainedMarketCount,
-      modelVersion: slot.metadata?.modelVersion || slot.ledger.modelVersion,
-      hasCheckpoint: slot.hasCheckpoint,
-      recentReferenceDelta: this.computeReferenceDelta(slot.ledger.recentTargetDeltas),
-    };
+    return { metadata: slot.metadata, trainedMarketCount: slot.ledger.trainedMarketCount, lastTrainedAt: slot.ledger.lastTrainedAt, hasCheckpoint: slot.hasCheckpoint };
   }
 
   public getStatuses(): ModelSlotStatus[] {
@@ -247,7 +240,6 @@ export class ModelRegistryService {
       latestTrainingError: slot.latestTrainingError,
       checkpointPath: slot.checkpointPath,
       ledgerPath: slot.ledgerPath,
-      recentReferenceDelta: this.computeReferenceDelta(slot.ledger.recentTargetDeltas),
     }));
     return statuses;
   }

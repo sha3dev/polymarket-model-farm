@@ -2,8 +2,6 @@ export { CollectorClientService } from "./collector-client.service.ts";
 export type {
   AssetWindow,
   CacheEntry,
-  CollectorStateMarket,
-  CollectorStatePayload,
   MarketSnapshotsPayload,
   MarketSummary,
   OrderBook,

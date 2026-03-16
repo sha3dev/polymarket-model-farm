@@ -13,9 +13,7 @@ test("TrainingOrchestratorService serializes concurrent cycles across all pairs"
 
   const trainingOrchestratorService = new TrainingOrchestratorService({
     collectorClientService: {
-      listMarkets: async ({ asset, window }: { asset: SupportedAsset; window: SupportedWindow }) => [
-        { slug: `${asset}-${window}-market`, asset, window, priceToBeat: 100, prevPriceToBeat: [99], marketStart: "2026-03-12T00:00:00.000Z", marketEnd: "2026-03-12T00:05:00.000Z" },
-      ],
+      listMarkets: async ({ asset, window }: { asset: SupportedAsset; window: SupportedWindow }) => [{ slug: `${asset}-${window}-market`, asset, window, priceToBeat: 100, marketStart: "2026-03-12T00:00:00.000Z", marketEnd: "2026-03-12T00:05:00.000Z" }],
       loadMarketSnapshots: async (slug: string) => {
         const [asset, window] = slug.split("-") as [SupportedAsset, SupportedWindow, string];
         return { slug, asset, window, marketStart: "2026-03-12T00:00:00.000Z", marketEnd: "2026-03-12T00:05:00.000Z", snapshots: buildSnapshots(asset, window) };
@@ -33,8 +31,9 @@ test("TrainingOrchestratorService serializes concurrent cycles across all pairs"
       markMarketAsTrained: async () => {},
       setLatestTrainingError: () => {},
     } as unknown as ConstructorParameters<typeof TrainingOrchestratorService>[0]["modelRegistryService"],
-    marketFeatureProjectorService: { projectSequence: () => ({ labels: ["feature"], rows: [[1]], maxSequenceLength: 600 }) } as unknown as ConstructorParameters<typeof TrainingOrchestratorService>[0]["marketFeatureProjectorService"],
-    predictionHistoryService: { resolvePrediction: async () => {} } as unknown as ConstructorParameters<typeof TrainingOrchestratorService>[0]["predictionHistoryService"],
+    marketFeatureProjectorService: { projectSequence: () => ({ labels: ["feature"], rows: [[1]], maxSequenceLength: 60 }) } as unknown as ConstructorParameters<
+      typeof TrainingOrchestratorService
+    >[0]["marketFeatureProjectorService"],
     now: () => Date.parse("2026-03-12T01:00:00.000Z"),
   });
 
@@ -49,8 +48,8 @@ test("TrainingOrchestratorService only loads the maximum number of trainable mar
   const trainingOrchestratorService = new TrainingOrchestratorService({
     collectorClientService: {
       listMarkets: async ({ asset, window }: { asset: SupportedAsset; window: SupportedWindow }) => [
-        { slug: `${asset}-${window}-market-a`, asset, window, priceToBeat: 100, prevPriceToBeat: [99], marketStart: "2026-03-12T00:00:00.000Z", marketEnd: "2026-03-12T00:05:00.000Z" },
-        { slug: `${asset}-${window}-market-b`, asset, window, priceToBeat: 100, prevPriceToBeat: [99], marketStart: "2026-03-12T00:10:00.000Z", marketEnd: "2026-03-12T00:15:00.000Z" },
+        { slug: `${asset}-${window}-market-a`, asset, window, priceToBeat: 100, marketStart: "2026-03-12T00:00:00.000Z", marketEnd: "2026-03-12T00:05:00.000Z" },
+        { slug: `${asset}-${window}-market-b`, asset, window, priceToBeat: 100, marketStart: "2026-03-12T00:10:00.000Z", marketEnd: "2026-03-12T00:15:00.000Z" },
       ],
       loadMarketSnapshots: async (slug: string) => {
         loadedSlugs.push(slug);
@@ -58,11 +57,10 @@ test("TrainingOrchestratorService only loads the maximum number of trainable mar
         return { slug, asset, window, marketStart: "2026-03-12T00:00:00.000Z", marketEnd: "2026-03-12T00:05:00.000Z", snapshots: buildSnapshots(asset, window) };
       },
     } as unknown as ConstructorParameters<typeof TrainingOrchestratorService>[0]["collectorClientService"],
-    modelRegistryService: { hasTrainedMarket: () => false, train: async () => {}, markMarketAsTrained: async () => {}, setLatestTrainingError: () => {} } as unknown as ConstructorParameters<
+    modelRegistryService: { hasTrainedMarket: () => false, train: async () => {}, markMarketAsTrained: async () => {}, setLatestTrainingError: () => {} } as unknown as ConstructorParameters<typeof TrainingOrchestratorService>[0]["modelRegistryService"],
+    marketFeatureProjectorService: { projectSequence: () => ({ labels: ["feature"], rows: [[1]], maxSequenceLength: 60 }) } as unknown as ConstructorParameters<
       typeof TrainingOrchestratorService
-    >[0]["modelRegistryService"],
-    marketFeatureProjectorService: { projectSequence: () => ({ labels: ["feature"], rows: [[1]], maxSequenceLength: 600 }) } as unknown as ConstructorParameters<typeof TrainingOrchestratorService>[0]["marketFeatureProjectorService"],
-    predictionHistoryService: { resolvePrediction: async () => {} } as unknown as ConstructorParameters<typeof TrainingOrchestratorService>[0]["predictionHistoryService"],
+    >[0]["marketFeatureProjectorService"],
     now: () => Date.parse("2026-03-12T01:00:00.000Z"),
   });
 
@@ -70,6 +68,43 @@ test("TrainingOrchestratorService only loads the maximum number of trainable mar
 
   assert.equal(loadedSlugs.length, SUPPORTED_ASSETS.length * SUPPORTED_WINDOWS.length);
   assert.ok(loadedSlugs.every((slug) => slug.endsWith("market-a")));
+});
+
+test("TrainingOrchestratorService trains on a strike-relative log return", async () => {
+  let trainedTargetValue = 0;
+  let markedTargetValue = 0;
+  const trainingOrchestratorService = new TrainingOrchestratorService({
+    collectorClientService: {
+      listMarkets: async () => [{ slug: "btc-5m-market", asset: "btc", window: "5m", priceToBeat: 100, marketStart: "2026-03-12T00:00:00.000Z", marketEnd: "2026-03-12T00:05:00.000Z" }],
+      loadMarketSnapshots: async () => ({
+        slug: "btc-5m-market",
+        asset: "btc",
+        window: "5m",
+        marketStart: "2026-03-12T00:00:00.000Z",
+        marketEnd: "2026-03-12T00:05:00.000Z",
+        snapshots: [buildSnapshot("btc", "5m", Date.parse("2026-03-12T00:00:00.000Z"), 101.2)],
+      }),
+    } as unknown as ConstructorParameters<typeof TrainingOrchestratorService>[0]["collectorClientService"],
+    modelRegistryService: {
+      hasTrainedMarket: () => false,
+      train: async (_pair: { asset: SupportedAsset; window: SupportedWindow }, _sequence: number[][], targetValue: number) => {
+        trainedTargetValue = targetValue;
+      },
+      markMarketAsTrained: async (_pair: { asset: SupportedAsset; window: SupportedWindow }, _slug: string, _trainedAt: string, targetValue: number) => {
+        markedTargetValue = targetValue;
+      },
+      setLatestTrainingError: () => {},
+    } as unknown as ConstructorParameters<typeof TrainingOrchestratorService>[0]["modelRegistryService"],
+    marketFeatureProjectorService: { projectSequence: () => ({ labels: ["feature"], rows: [[1]], maxSequenceLength: 60 }) } as unknown as ConstructorParameters<
+      typeof TrainingOrchestratorService
+    >[0]["marketFeatureProjectorService"],
+    now: () => Date.parse("2026-03-12T01:00:00.000Z"),
+  });
+
+  await trainingOrchestratorService.runTrainingCycle();
+
+  assert.ok(Math.abs(trainedTargetValue - Math.log(101.2 / 100)) < 0.0000001);
+  assert.equal(trainedTargetValue, markedTargetValue);
 });
 
 function buildExpectedOrder(): string[] {
@@ -84,7 +119,11 @@ function buildExpectedOrder(): string[] {
 
 function buildSnapshots(asset: SupportedAsset, window: SupportedWindow): Snapshot[] {
   const baseTimestamp = Date.parse("2026-03-12T00:00:00.000Z");
-  return [buildSnapshot(asset, window, baseTimestamp, 100.2), buildSnapshot(asset, window, baseTimestamp + 10_000, 100.7), buildSnapshot(asset, window, baseTimestamp + 20_000, 101.1)];
+  return [
+    buildSnapshot(asset, window, baseTimestamp, 100.2),
+    buildSnapshot(asset, window, baseTimestamp + 10_000, 100.7),
+    buildSnapshot(asset, window, baseTimestamp + 20_000, 101.1),
+  ];
 }
 
 function buildSnapshot(asset: SupportedAsset, window: SupportedWindow, generatedAt: number, chainlinkPrice: number): Snapshot {
@@ -113,10 +152,14 @@ function buildSnapshot(asset: SupportedAsset, window: SupportedWindow, generated
 }
 
 function buildProviderOrderBook(asset: SupportedAsset, generatedAt: number, price: number): NonNullable<Snapshot["binanceOrderBook"]> {
-  return { type: "orderbook", provider: "binance", symbol: asset, ts: generatedAt, bids: [{ price, size: 1 }], asks: [{ price, size: 1 }] };
+  return { type: "orderbook", provider: "binance", symbol: asset, ts: generatedAt, bids: [{ price: price - 0.02, size: 1 }], asks: [{ price: price + 0.02, size: 1 }] };
 }
 
-function buildExchangeFields(chainlinkPrice: number, generatedAt: number, providerOrderBook: NonNullable<Snapshot["binanceOrderBook"]>): Pick<
+function buildExchangeFields(
+  chainlinkPrice: number,
+  generatedAt: number,
+  providerOrderBook: NonNullable<Snapshot["binanceOrderBook"]>,
+): Pick<
   Snapshot,
   | "binancePrice"
   | "binanceOrderBook"

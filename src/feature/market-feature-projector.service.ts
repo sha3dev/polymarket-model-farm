@@ -2,23 +2,18 @@
  * @section imports:internals
  */
 
-import { ORDERBOOK_SIDES, PROVIDER_KEYS } from "../collector/index.ts";
-import type { ProviderKey } from "../collector/index.ts";
+import { PROVIDER_KEYS } from "../collector/index.ts";
+import type { ProviderKey, Snapshot } from "../collector/index.ts";
+import config from "../config.ts";
 import type { FeatureProjectionInput, FeatureProjectionResult } from "./index.ts";
 import { MarketFeatureLabelService } from "./market-feature-label.service.ts";
 import { MarketFeatureStatService } from "./market-feature-stat.service.ts";
 
-/**
- * @section consts
- */
-
-const EXCHANGE_PROVIDER_KEYS: readonly ProviderKey[] = ["binance", "coinbase", "kraken", "okx"];
-
-/**
- * @section public:properties
- */
-
 export class MarketFeatureProjectorService {
+  /**
+   * @section private:properties
+   */
+
   private readonly featureLabels: string[];
 
   private readonly marketFeatureStatService: MarketFeatureStatService;
@@ -44,118 +39,79 @@ export class MarketFeatureProjectorService {
    * @section private:methods
    */
 
-  private projectMarketContext(input: FeatureProjectionInput, index: number): number[] {
+  private buildResampledSnapshots(input: FeatureProjectionInput): Snapshot[] {
+    const resampleSeconds = input.window === "5m" ? config.FEATURE_RESAMPLE_SECONDS_5M : config.FEATURE_RESAMPLE_SECONDS_15M;
+    const maxSequenceLength = input.window === "5m" ? 60 : 90;
     const marketStartTs = Date.parse(input.marketStart);
     const marketEndTs = Date.parse(input.marketEnd);
     const totalDurationMs = Math.max(marketEndTs - marketStartTs, 1);
-    const generatedAt = input.snapshots[index]?.generatedAt || marketStartTs;
-    const progress = this.marketFeatureStatService.clamp((generatedAt - marketStartTs) / totalDurationMs, 0, 1);
-    const prevBeatMeanDelta = this.marketFeatureStatService.computePrevBeatMeanDelta(input.priceToBeat, input.prevPriceToBeat || []);
-    return [progress, input.priceToBeat, Math.log(Math.max(input.priceToBeat, 1e-9)), prevBeatMeanDelta];
+    const bucketCount = Math.max(Math.ceil(totalDurationMs / (resampleSeconds * 1000)), 1);
+    const latestSnapshotByBucket = new Map<number, Snapshot>();
+    for (const snapshot of input.snapshots) {
+      const relativeMs = Math.max(snapshot.generatedAt - marketStartTs, 0);
+      const bucketIndex = this.marketFeatureStatService.clamp(Math.floor(relativeMs / (resampleSeconds * 1000)), 0, bucketCount - 1);
+      latestSnapshotByBucket.set(bucketIndex, snapshot);
+    }
+    const resampledSnapshots: Snapshot[] = [];
+    let previousSnapshot: Snapshot | null = null;
+    for (let bucketIndex = 0; bucketIndex < bucketCount; bucketIndex += 1) {
+      const currentSnapshot: Snapshot | null = latestSnapshotByBucket.get(bucketIndex) || previousSnapshot || null;
+      if (currentSnapshot) {
+        resampledSnapshots.push(currentSnapshot);
+        previousSnapshot = currentSnapshot;
+      }
+    }
+    return resampledSnapshots.slice(-maxSequenceLength);
   }
 
-  private projectExchangeState(input: FeatureProjectionInput, index: number): number[] {
-    const snapshot = input.snapshots[index];
-    const features: number[] = [];
+  private buildExchangeRow(input: FeatureProjectionInput, snapshots: Snapshot[], index: number, providerKey: ProviderKey): number[] {
+    const snapshot = snapshots[index];
     if (!snapshot) {
-      throw new Error(`snapshot index ${index} is out of range`);
+      throw new Error(`resampled snapshot index ${index} is out of range`);
     }
-    for (const providerKey of PROVIDER_KEYS) {
-      features.push(...this.projectExchangeRow(input, index, providerKey, snapshot));
-    }
-    return features;
-  }
-
-  private projectExchangeRow(input: FeatureProjectionInput, index: number, providerKey: (typeof PROVIDER_KEYS)[number], snapshot: FeatureProjectionInput["snapshots"][number]): number[] {
-    const history = this.marketFeatureStatService.collectProviderHistory(input.snapshots, index, providerKey);
     const currentPrice = this.marketFeatureStatService.readProviderPrice(snapshot, providerKey);
-    const orderBook = this.marketFeatureStatService.readProviderOrderBook(snapshot, providerKey);
-    const bestBid = this.marketFeatureStatService.readBestBid(orderBook);
-    const bestAsk = this.marketFeatureStatService.readBestAsk(orderBook);
-    const midPrice = this.marketFeatureStatService.readOrderBookMid(orderBook);
-    const topBidDepth = this.marketFeatureStatService.readTopDepth(orderBook, "bids");
-    const topAskDepth = this.marketFeatureStatService.readTopDepth(orderBook, "asks");
-    const spread = Math.max(bestAsk - bestBid, 0);
-    return [
+    const currentOrderBook = this.marketFeatureStatService.readProviderOrderBook(snapshot, providerKey);
+    const bestBid = this.marketFeatureStatService.readBestBid(currentOrderBook);
+    const bestAsk = this.marketFeatureStatService.readBestAsk(currentOrderBook);
+    const midPrice = this.marketFeatureStatService.readOrderBookMid(currentOrderBook);
+    const topBidDepth = this.marketFeatureStatService.readTopDepth(currentOrderBook, "bids");
+    const topAskDepth = this.marketFeatureStatService.readTopDepth(currentOrderBook, "asks");
+    const priceHistory = snapshots.slice(0, index + 1).map((historySnapshot) => this.marketFeatureStatService.readProviderPrice(historySnapshot, providerKey));
+    const exchangeRow = [
       currentPrice === null ? 0 : 1,
-      this.marketFeatureStatService.normalizePrice(currentPrice, input.priceToBeat),
-      this.marketFeatureStatService.computeMomentum(history, 20),
-      this.marketFeatureStatService.computeMomentum(history, 60),
-      this.marketFeatureStatService.computeMomentum(history, 120),
-      this.marketFeatureStatService.computeVolatility(history, 20),
-      this.marketFeatureStatService.computeVolatility(history, 60),
-      this.marketFeatureStatService.computeVolatility(history, 120),
-      this.marketFeatureStatService.normalizePrice(bestBid === 0 ? null : bestBid, input.priceToBeat),
-      this.marketFeatureStatService.normalizePrice(bestAsk === 0 ? null : bestAsk, input.priceToBeat),
-      this.marketFeatureStatService.normalizeSpread(spread, midPrice),
-      this.marketFeatureStatService.normalizePrice(midPrice === 0 ? null : midPrice, input.priceToBeat),
+      this.marketFeatureStatService.normalizeDelta(currentPrice, input.priceToBeat),
+      this.marketFeatureStatService.computeMomentum(priceHistory, 3, input.priceToBeat),
+      this.marketFeatureStatService.computeMomentum(priceHistory, 9, input.priceToBeat),
       this.marketFeatureStatService.computeImbalance(topBidDepth, topAskDepth),
+      this.marketFeatureStatService.computeRelativeSpread(bestBid, bestAsk, midPrice),
+      this.marketFeatureStatService.computeDepthRatio(topBidDepth, topAskDepth, currentPrice || 0),
     ];
+    return exchangeRow;
   }
 
-  private projectExternalStructure(input: FeatureProjectionInput, index: number): number[] {
-    const snapshot = input.snapshots[index];
+  private buildSnapshotRow(input: FeatureProjectionInput, snapshots: Snapshot[], index: number): number[] {
+    const snapshot = snapshots[index];
     if (!snapshot) {
-      throw new Error(`snapshot index ${index} is out of range`);
+      throw new Error(`resampled snapshot index ${index} is out of range`);
     }
-    const exchangePrices = EXCHANGE_PROVIDER_KEYS.map((providerKey) => this.marketFeatureStatService.readProviderPrice(snapshot, providerKey)).filter((price): price is number => price !== null);
-    const sortedPrices = exchangePrices.slice().sort((left, right) => left - right);
-    const exchangeMedianPrice = this.marketFeatureStatService.readMedianExternalPrice(snapshot, EXCHANGE_PROVIDER_KEYS) || 0;
-    const chainlinkPrice = this.marketFeatureStatService.readProviderPrice(snapshot, "chainlink");
-    const priceRange = exchangePrices.length === 0 ? 0 : (sortedPrices[sortedPrices.length - 1] || 0) - (sortedPrices[0] || 0);
-    return [
-      this.marketFeatureStatService.normalizeSpread(priceRange, exchangeMedianPrice),
-      this.marketFeatureStatService.normalizeSpread(this.marketFeatureStatService.computeStandardDeviation(exchangePrices), exchangeMedianPrice),
-      exchangePrices.length / EXCHANGE_PROVIDER_KEYS.length,
-      this.marketFeatureStatService.normalizePrice(chainlinkPrice, exchangeMedianPrice),
-    ];
-  }
-
-  private projectPolymarketState(input: FeatureProjectionInput, index: number): number[] {
-    const snapshot = input.snapshots[index];
-    if (!snapshot) {
-      throw new Error(`snapshot index ${index} is out of range`);
-    }
-    const upMid = this.marketFeatureStatService.readOrderBookMid(snapshot.upOrderBook);
-    const downMid = this.marketFeatureStatService.readOrderBookMid(snapshot.downOrderBook);
-    return [
-      this.marketFeatureStatService.safeNumber(snapshot.upPrice),
-      this.marketFeatureStatService.safeNumber(snapshot.downPrice),
-      this.marketFeatureStatService.safeNumber(snapshot.upPrice) - this.marketFeatureStatService.safeNumber(snapshot.downPrice),
-      upMid,
-      downMid,
-      upMid - downMid,
-      this.marketFeatureStatService.safeNumber(snapshot.upPrice) + this.marketFeatureStatService.safeNumber(snapshot.downPrice) - 1,
-      upMid + downMid - 1,
-    ];
-  }
-
-  private projectPolymarketOrderBooks(input: FeatureProjectionInput, index: number): number[] {
-    const snapshot = input.snapshots[index];
-    if (!snapshot) {
-      throw new Error(`snapshot index ${index} is out of range`);
-    }
-    const features: number[] = [];
-    for (const sideKey of ORDERBOOK_SIDES) {
-      const orderBook = sideKey === "up" ? snapshot.upOrderBook : snapshot.downOrderBook;
-      const bestBid = this.marketFeatureStatService.readBestBid(orderBook);
-      const bestAsk = this.marketFeatureStatService.readBestAsk(orderBook);
-      const midPrice = this.marketFeatureStatService.readOrderBookMid(orderBook);
-      const topBidDepth = this.marketFeatureStatService.readTopDepth(orderBook, "bids");
-      const topAskDepth = this.marketFeatureStatService.readTopDepth(orderBook, "asks");
-      features.push(bestBid, bestAsk, Math.max(bestAsk - bestBid, 0), midPrice, this.marketFeatureStatService.computeImbalance(topBidDepth, topAskDepth));
-    }
-    return features;
-  }
-
-  private projectSnapshotRow(input: FeatureProjectionInput, index: number): number[] {
+    const marketStartTs = Date.parse(input.marketStart);
+    const marketEndTs = Date.parse(input.marketEnd);
+    const totalDurationMs = Math.max(marketEndTs - marketStartTs, 1);
+    const progress = this.marketFeatureStatService.clamp((snapshot.generatedAt - marketStartTs) / totalDurationMs, 0, 1);
+    const chainlinkHistory = snapshots
+      .slice(0, index + 1)
+      .map((historySnapshot) => this.marketFeatureStatService.readProviderPrice(historySnapshot, "chainlink"));
     const row = [
-      ...this.projectMarketContext(input, index),
-      ...this.projectExchangeState(input, index),
-      ...this.projectExternalStructure(input, index),
-      ...this.projectPolymarketState(input, index),
-      ...this.projectPolymarketOrderBooks(input, index),
+      1 - progress,
+      this.marketFeatureStatService.normalizeDelta(this.marketFeatureStatService.readProviderPrice(snapshot, "chainlink"), input.priceToBeat),
+      this.marketFeatureStatService.computeMomentum(chainlinkHistory, 3, input.priceToBeat),
+      this.marketFeatureStatService.computeMomentum(chainlinkHistory, 9, input.priceToBeat),
     ];
+    for (const providerKey of PROVIDER_KEYS) {
+      if (providerKey !== "chainlink") {
+        row.push(...this.buildExchangeRow(input, snapshots, index, providerKey));
+      }
+    }
     return row;
   }
 
@@ -164,9 +120,10 @@ export class MarketFeatureProjectorService {
    */
 
   public projectSequence(input: FeatureProjectionInput): FeatureProjectionResult {
-    const rows = input.snapshots.map((_snapshot, index) => this.projectSnapshotRow(input, index));
-    const maxSequenceLength = input.window === "5m" ? 600 : 1800;
-    return { labels: this.featureLabels.slice(), rows, maxSequenceLength };
+    const resampledSnapshots = this.buildResampledSnapshots(input);
+    const rows = resampledSnapshots.map((_snapshot, index) => this.buildSnapshotRow(input, resampledSnapshots, index));
+    const projection = { labels: this.featureLabels.slice(), rows, maxSequenceLength: input.window === "5m" ? 60 : 90 };
+    return projection;
   }
 
   public getFeatureLabels(): string[] {

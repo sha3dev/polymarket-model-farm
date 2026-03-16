@@ -10,12 +10,16 @@ import type { AssetWindow, SupportedAsset, SupportedWindow } from "../collector/
 
 export type ModelMetadata = {
   modelVersion: string;
+  featureSchemaVersion: string;
+  targetKind: string;
   featureCount: number;
   maxSequenceLength: number;
-  gruUnits: number;
+  gruUnitsPrimary: number;
+  gruUnitsSecondary: number;
   dropoutRate: number;
   learningRate: number;
   l2Regularization: number;
+  resampleSeconds: number;
   checkpointedAt: string;
 };
 
@@ -27,15 +31,14 @@ export type TrainingLedger = {
   lastTrainedSlug: string | null;
   lastTrainedAt: string | null;
   modelVersion: string;
-  recentTargetDeltas: number[];
+  recentTargetValues: number[];
 };
 
 export type ModelPredictionContext = {
   metadata: ModelMetadata | null;
   trainedMarketCount: number;
-  modelVersion: string;
+  lastTrainedAt: string | null;
   hasCheckpoint: boolean;
-  recentReferenceDelta: number;
 };
 
 export type ModelSlotStatus = {
@@ -50,7 +53,6 @@ export type ModelSlotStatus = {
   latestTrainingError: string | null;
   checkpointPath: string;
   ledgerPath: string;
-  recentReferenceDelta: number;
 };
 
 export type ModelSlotState = {

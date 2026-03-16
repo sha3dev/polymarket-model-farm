@@ -6,43 +6,74 @@ import { MarketFeatureProjectorService } from "../src/feature/index.ts";
 
 const PROJECTOR_SERVICE = MarketFeatureProjectorService.createDefault();
 
-test("MarketFeatureProjectorService builds the intended 91-feature row", () => {
+test("MarketFeatureProjectorService builds the intended 32-feature row", () => {
   const projection = PROJECTOR_SERVICE.projectSequence({
     asset: "btc",
     window: "5m",
     marketStart: "2026-03-12T00:00:00.000Z",
     marketEnd: "2026-03-12T00:05:00.000Z",
     priceToBeat: 100,
-    prevPriceToBeat: [99.5, 100.2],
     snapshots: [buildSnapshot(0, 100.1), buildSnapshot(10_000, 100.8)],
   });
-
   const labels = PROJECTOR_SERVICE.getFeatureLabels();
 
-  assert.equal(labels.length, 91);
-  assert.equal(projection.rows.length, 2);
-  assert.equal(projection.rows[0]?.length, 91);
-  assert.equal(labels.includes("chainlink-momentum10s"), true);
-  assert.equal(labels.includes("binance-volatility60s"), true);
-  assert.equal(labels.includes("chainlink-vs-exchange-median"), true);
-  assert.equal(labels.includes("polymarket-overround"), true);
-  assert.equal(labels.includes("up-top-book-imbalance"), true);
-  assert.ok((projection.rows[1]?.[0] || 0) > 0);
+  assert.equal(labels.length, 32);
+  assert.equal(projection.rows.length, 60);
+  assert.equal(projection.rows[0]?.length, 32);
+  assert.equal(labels.includes("binance-obi"), true);
+  assert.equal(labels.includes("coinbase-relative-spread"), true);
+  assert.equal(labels.includes("kraken-depth-ratio"), true);
+  assert.equal(labels.includes("time-remaining-norm"), true);
+  assert.equal(labels.includes("price-to-beat"), false);
+  assert.equal(labels.includes("chainlink-vs-exchange-median"), false);
+  assert.equal(labels.includes("up-price"), false);
   assert.ok(projection.rows.flat().every((value) => Number.isFinite(value)));
 });
 
-function buildSnapshot(offsetMs: number, chainlinkPrice: number): Snapshot {
+test("MarketFeatureProjectorService bounds resampled sequence length by market window", () => {
+  const fiveMinuteProjection = PROJECTOR_SERVICE.projectSequence({
+    asset: "btc",
+    window: "5m",
+    marketStart: "2026-03-12T00:00:00.000Z",
+    marketEnd: "2026-03-12T00:05:00.000Z",
+    priceToBeat: 100,
+    snapshots: buildSnapshots("5m", 100),
+  });
+  const fifteenMinuteProjection = PROJECTOR_SERVICE.projectSequence({
+    asset: "btc",
+    window: "15m",
+    marketStart: "2026-03-12T00:00:00.000Z",
+    marketEnd: "2026-03-12T00:15:00.000Z",
+    priceToBeat: 100,
+    snapshots: buildSnapshots("15m", 220),
+  });
+
+  assert.equal(fiveMinuteProjection.maxSequenceLength, 60);
+  assert.equal(fiveMinuteProjection.rows.length, 60);
+  assert.equal(fifteenMinuteProjection.maxSequenceLength, 90);
+  assert.equal(fifteenMinuteProjection.rows.length, 90);
+});
+
+function buildSnapshots(window: "5m" | "15m", count: number): Snapshot[] {
+  const snapshots: Snapshot[] = [];
+  for (let index = 0; index < count; index += 1) {
+    snapshots.push(buildSnapshot(index * 5_000, 100 + index * 0.05, window));
+  }
+  return snapshots;
+}
+
+function buildSnapshot(offsetMs: number, chainlinkPrice: number, window: "5m" | "15m" = "5m"): Snapshot {
   const generatedAt = Date.parse("2026-03-12T00:00:00.000Z") + offsetMs;
   const exchangeFields = buildExchangeFields(generatedAt, chainlinkPrice);
   return {
     asset: "btc",
-    window: "5m",
+    window,
     generatedAt,
     marketId: "market-id",
-    marketSlug: "btc-5m-test",
+    marketSlug: "btc-test",
     marketConditionId: "condition-id",
     marketStart: "2026-03-12T00:00:00.000Z",
-    marketEnd: "2026-03-12T00:05:00.000Z",
+    marketEnd: window === "5m" ? "2026-03-12T00:05:00.000Z" : "2026-03-12T00:15:00.000Z",
     priceToBeat: 100,
     upAssetId: "up-asset",
     upPrice: 0.55,
@@ -57,10 +88,13 @@ function buildSnapshot(offsetMs: number, chainlinkPrice: number): Snapshot {
 }
 
 function buildProviderOrderBook(provider: string, generatedAt: number, price: number): NonNullable<Snapshot["binanceOrderBook"]> {
-  return { type: "orderbook", provider, symbol: "btc", ts: generatedAt, bids: [{ price, size: 1 }], asks: [{ price, size: 1 }] };
+  return { type: "orderbook", provider, symbol: "btc", ts: generatedAt, bids: [{ price: price - 0.03, size: 5 }], asks: [{ price: price + 0.03, size: 6 }] };
 }
 
-function buildExchangeFields(generatedAt: number, chainlinkPrice: number): Pick<
+function buildExchangeFields(
+  generatedAt: number,
+  chainlinkPrice: number,
+): Pick<
   Snapshot,
   | "binancePrice"
   | "binanceOrderBook"

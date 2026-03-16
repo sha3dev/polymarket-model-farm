@@ -23,11 +23,11 @@ import type { ModelMetadata, TrainingLedger } from "./index.ts";
 type ModelStoreServiceOptions = { storageDirectoryPath: string };
 type ModelArtifactPaths = { pairDirectoryPath: string; modelDirectoryPath: string; modelJsonPath: string; ledgerPath: string; metadataPath: string };
 
-/**
- * @section public:properties
- */
-
 export class ModelStoreService {
+  /**
+   * @section private:properties
+   */
+
   private readonly storageDirectoryPath: string;
 
   /**

@@ -7,7 +7,6 @@ import type { AssetWindow } from "../collector/index.ts";
 import { SUPPORTED_ASSETS, SUPPORTED_WINDOWS } from "../collector/index.ts";
 import config from "../config.ts";
 import type { MarketFeatureProjectorService } from "../feature/index.ts";
-import type { PredictionHistoryService } from "../history/index.ts";
 import LOGGER from "../logger.ts";
 import type { ModelRegistryService } from "../model/index.ts";
 import type { TrainingMarketCandidate, TrainingPairCycleResult } from "./index.ts";
@@ -20,22 +19,19 @@ type TrainingOrchestratorServiceOptions = {
   collectorClientService: CollectorClientService;
   modelRegistryService: ModelRegistryService;
   marketFeatureProjectorService: MarketFeatureProjectorService;
-  predictionHistoryService: PredictionHistoryService;
   now: () => number;
 };
 
-/**
- * @section public:properties
- */
-
 export class TrainingOrchestratorService {
+  /**
+   * @section private:properties
+   */
+
   private readonly collectorClientService: CollectorClientService;
 
   private readonly modelRegistryService: ModelRegistryService;
 
   private readonly marketFeatureProjectorService: MarketFeatureProjectorService;
-
-  private readonly predictionHistoryService: PredictionHistoryService;
 
   private readonly now: () => number;
 
@@ -55,7 +51,6 @@ export class TrainingOrchestratorService {
     this.collectorClientService = options.collectorClientService;
     this.modelRegistryService = options.modelRegistryService;
     this.marketFeatureProjectorService = options.marketFeatureProjectorService;
-    this.predictionHistoryService = options.predictionHistoryService;
     this.now = options.now;
     this.loopTimer = null;
     this.isRunning = false;
@@ -71,9 +66,8 @@ export class TrainingOrchestratorService {
     collectorClientService: CollectorClientService,
     modelRegistryService: ModelRegistryService,
     marketFeatureProjectorService: MarketFeatureProjectorService,
-    predictionHistoryService: PredictionHistoryService,
   ): TrainingOrchestratorService {
-    return new TrainingOrchestratorService({ collectorClientService, modelRegistryService, marketFeatureProjectorService, predictionHistoryService, now: () => Date.now() });
+    return new TrainingOrchestratorService({ collectorClientService, modelRegistryService, marketFeatureProjectorService, now: () => Date.now() });
   }
 
   /**
@@ -109,11 +103,9 @@ export class TrainingOrchestratorService {
 
   private buildCandidate(payload: TrainingMarketCandidate): TrainingMarketCandidate | null {
     const finalSnapshot = payload.snapshots[payload.snapshots.length - 1] || null;
-    const maxSequenceLength = payload.window === "5m" ? 600 : 1800;
-    const hasPrevPriceToBeat = payload.prevPriceToBeat.length > 0;
     const hasFinalChainlink = finalSnapshot?.chainlinkPrice !== null && finalSnapshot?.chainlinkPrice !== undefined;
-    const isValidLength = payload.snapshots.length > 0 && payload.snapshots.length <= maxSequenceLength;
-    const candidate = hasPrevPriceToBeat && hasFinalChainlink && isValidLength ? payload : null;
+    const isValidLength = payload.snapshots.length > 0;
+    const candidate = hasFinalChainlink && isValidLength ? payload : null;
     return candidate;
   }
 
@@ -128,13 +120,13 @@ export class TrainingOrchestratorService {
       const hasPriceToBeat = typeof marketSummary.priceToBeat === "number";
       const hasTrainedMarket = this.modelRegistryService.hasTrainedMarket(pair, marketSummary.slug);
       if (hasClosed && hasPriceToBeat && !hasTrainedMarket) {
+        // Only hydrate snapshots for candidates that are truly trainable in this cycle.
         const marketPayload = await this.collectorClientService.loadMarketSnapshots(marketSummary.slug);
         const candidate = this.buildCandidate({
           slug: marketPayload.slug,
           asset: marketPayload.asset,
           window: marketPayload.window,
           priceToBeat: marketSummary.priceToBeat || 0,
-          prevPriceToBeat: marketSummary.prevPriceToBeat || [],
           marketStart: marketPayload.marketStart,
           marketEnd: marketPayload.marketEnd,
           snapshots: marketPayload.snapshots,
@@ -151,12 +143,12 @@ export class TrainingOrchestratorService {
     const featureProjection = this.marketFeatureProjectorService.projectSequence(candidate);
     const finalSnapshot = candidate.snapshots[candidate.snapshots.length - 1];
     const finalChainlinkPrice = finalSnapshot?.chainlinkPrice || candidate.priceToBeat;
-    const rawTargetDelta = (finalChainlinkPrice - candidate.priceToBeat) / candidate.priceToBeat;
-    const boundedTarget = Math.tanh(rawTargetDelta / config.DELTA_TARGET_SCALE);
+    // Predict a strike-relative log return so the model stays scale-stable across assets without target compression.
+    const targetValue = Math.log(finalChainlinkPrice / candidate.priceToBeat);
     const trainedAt = new Date(this.now()).toISOString();
-    await this.modelRegistryService.train(pair, featureProjection.rows, boundedTarget);
-    await this.modelRegistryService.markMarketAsTrained(pair, candidate.slug, trainedAt, rawTargetDelta);
-    await this.predictionHistoryService.resolvePrediction(pair, candidate.slug, rawTargetDelta);
+    await this.modelRegistryService.train(pair, featureProjection.rows, targetValue);
+    // A slug only becomes part of the ledger after the training step completes successfully.
+    await this.modelRegistryService.markMarketAsTrained(pair, candidate.slug, trainedAt, targetValue);
   }
 
   private async runPairCycle(pair: AssetWindow): Promise<TrainingPairCycleResult> {
